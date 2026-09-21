@@ -534,3 +534,27 @@ main { padding: 28px; }
     grid-template-columns: 1fr;
   }
 }
+
+
+.finalized-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #edf8f3;
+  border: 1px solid #cfe7dc;
+  color: #235b45;
+}
+
+.finalized-banner span {
+  font-size: 12px;
+  color: #557166;
+}
+
+.notice.success {
+  background: #edf8f3;
+  border-color: #cfe7dc;
+  color: #235b45;
+}
