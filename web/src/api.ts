@@ -122,9 +122,20 @@ export async function getEligibleTemplates(context: LocalContext): Promise<Array
   return (await parse<{ data: Array<{id:string;name:string;version:number;fields:TemplateField[]}> }>(response)).data;
 }
 
+export async function inspectTemplate(context: LocalContext, file: File): Promise<TemplateField[]> {
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(API_BASE + "/v1/admin/templates/inspect", {
+    method: "POST",
+    headers: requestHeaders(context, false),
+    body: form
+  });
+  return (await parse<{ data: { fields: TemplateField[] } }>(response)).data.fields;
+}
+
 export async function uploadTemplate(
   context: LocalContext,
-  input: { name: string; file: File; fields: TemplateField[]; specialtyCode: string; visitType?: string }
+  input: { name: string; file: File; fields: TemplateField[]; specialtyCode: string; practitionerId?: string; visitType?: string }
 ): Promise<void> {
   const form = new FormData();
   form.set("name", input.name);
@@ -132,6 +143,7 @@ export async function uploadTemplate(
   form.set("assignments_json", JSON.stringify([{
     specialty_code: input.specialtyCode || null,
     branch_id: context.branchId || null,
+    practitioner_id: input.practitionerId || null,
     visit_type: input.visitType || null,
   }]));
   form.set("file", input.file);
