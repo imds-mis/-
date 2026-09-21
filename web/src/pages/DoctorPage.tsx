@@ -623,8 +623,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                   Связанный опубликованный протокол не найден.
                 </div>
               )}
-              </div>
-            </>
+            </div>
           )}
         </section>
       )}
@@ -665,7 +664,8 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                   QR-проверка
                 </a>
               )}
-            </div>
+              </div>
+            </>
           )}
         </section>
       )}
