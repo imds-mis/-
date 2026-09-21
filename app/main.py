@@ -484,7 +484,25 @@ def create_app(
             TemplateAssignment.tenant_id == ctx.tenant_id,
         )).all()
         rows = [{"specialty_code": a.specialty_code, "branch_id": a.branch_id, "practitioner_id": a.practitioner_id, "visit_type": a.visit_type} for a in assignments]
-        if rows and not template_is_eligible(rows, specialty_code=ctx.specialty_code, branch_id=ctx.branch_id, practitioner_id=ctx.practitioner_id, visit_type=body.visit_type):
+        profile = session.scalar(select(DoctorProfile).where(
+            DoctorProfile.tenant_id == ctx.tenant_id,
+            DoctorProfile.practitioner_id == ctx.practitioner_id,
+            DoctorProfile.active.is_(True),
+        ))
+        candidate_specialties = profile.specialty_codes if profile else ([ctx.specialty_code] if ctx.specialty_code else [])
+        eligible = not rows
+        if rows:
+            for specialty in candidate_specialties or [None]:
+                if template_is_eligible(
+                    rows,
+                    specialty_code=specialty,
+                    branch_id=ctx.branch_id,
+                    practitioner_id=ctx.practitioner_id,
+                    visit_type=body.visit_type,
+                ):
+                    eligible = True
+                    break
+        if not eligible:
             raise HTTPException(403, "template not eligible")
         doc = MedicalDocument(
             id=str(uuid.uuid4()),
