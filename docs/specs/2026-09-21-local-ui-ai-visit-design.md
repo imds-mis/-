@@ -47,7 +47,7 @@ Existing FastAPI service, extended with AI visit capture endpoints.
 
 ### Persistence
 
-- PostgreSQL in Docker Compose for normal local demo
+- PostgreSQL in Docker Compose for local real-data run
 - Persistent Docker volume for generated DOCX/PDF/template files
 
 ### Document rendering
@@ -62,7 +62,7 @@ The backend uses real provider-neutral integrations only:
 - real speech + speaker-separation pipeline via `SPEECH_PIPELINE_URL`
 - real OpenAI-compatible clinical extraction via `LLM_BASE_URL`
 
-If any required provider is not configured, the affected workflow fails explicitly with a configuration error. No synthetic patients, fake transcript, or demo AI response is generated.
+If any required provider is not configured, the affected workflow fails explicitly with a configuration error. No synthetic patients, fake transcript, or synthetic AI response is generated.
 
 No Cloudflare and no Supabase.
 
