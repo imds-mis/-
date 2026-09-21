@@ -13,3 +13,12 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libreoffice-writer
       - run: pip install -r requirements.txt pytest httpx
       - run: PYTHONPATH=. pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
