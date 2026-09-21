@@ -17,11 +17,11 @@ describe("MIS medical documents UI", () => {
     expect(screen.getByRole("link", { name: /Шаблоны/i })).toBeInTheDocument();
   });
 
-  it("keeps technical MIS identifiers out of the main clinical UI", () => {
+  it("runs locally without a connection/context setup screen", () => {
     render(<App />);
     expect(screen.queryByText(/Tenant UUID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Practitioner UUID/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Подключение/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Подключение/i })).not.toBeInTheDocument();
   });
 
   it("renders doctor workspace at /doctor without demo labels", () => {
