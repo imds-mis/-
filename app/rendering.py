@@ -9,7 +9,7 @@ from typing import Any
 
 import qrcode
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
 
 
 TOKEN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -38,8 +38,56 @@ def _replace_paragraph(paragraph, values: dict[str, Any]) -> None:
         paragraph.text = replaced
 
 
-def render_docx(source: Path, destination: Path, values: dict[str, Any], qr_url: str | None = None) -> None:
+def _apply_clinic_header(doc: Document, clinic_header: dict[str, Any] | None, logo_path: Path | None) -> None:
+    if not clinic_header:
+        return
+    for section in doc.sections:
+        header = section.header
+        if logo_path and logo_path.exists():
+            p = header.add_paragraph()
+            p.alignment = 1
+            try:
+                p.add_run().add_picture(str(logo_path), width=Inches(0.9))
+            except Exception:
+                pass
+        name = str(clinic_header.get("clinic_name") or "").strip()
+        if name:
+            p = header.add_paragraph()
+            p.alignment = 1
+            run = p.add_run(name)
+            run.bold = True
+            run.font.size = Pt(12)
+        details = [
+            str(clinic_header.get("extra_line") or "").strip(),
+            str(clinic_header.get("bin") or "").strip(),
+            str(clinic_header.get("address") or "").strip(),
+            str(clinic_header.get("phone") or "").strip(),
+            str(clinic_header.get("license_text") or "").strip(),
+        ]
+        details = [item for item in details if item]
+        if details:
+            p = header.add_paragraph(" · ".join(details))
+            p.alignment = 1
+            for run in p.runs:
+                run.font.size = Pt(8)
+        footer_text = str(clinic_header.get("footer_text") or "").strip()
+        if footer_text:
+            p = section.footer.add_paragraph(footer_text)
+            p.alignment = 1
+            for run in p.runs:
+                run.font.size = Pt(8)
+
+
+def render_docx(
+    source: Path,
+    destination: Path,
+    values: dict[str, Any],
+    qr_url: str | None = None,
+    clinic_header: dict[str, Any] | None = None,
+    logo_path: Path | None = None,
+) -> None:
     doc = Document(source)
+    _apply_clinic_header(doc, clinic_header, logo_path)
     for paragraph in doc.paragraphs:
         _replace_paragraph(paragraph, values)
     for table in doc.tables:
