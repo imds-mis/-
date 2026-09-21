@@ -1,10 +1,14 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
 
 describe("MIS medical documents UI", () => {
   beforeEach(() => {
     window.history.pushState({}, "", "/doctor");
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("shows the two real workspaces in navigation", () => {
