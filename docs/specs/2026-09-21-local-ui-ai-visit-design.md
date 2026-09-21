@@ -56,19 +56,13 @@ Existing FastAPI service, extended with AI visit capture endpoints.
 
 ### AI adapters
 
-The backend exposes provider-neutral interfaces:
+The backend uses real provider-neutral integrations only:
 
-- `SpeechRecognitionAdapter`
-- `SpeakerDiarizationAdapter`
-- `ClinicalFieldExtractionAdapter`
+- real MIS upstream for patients/practitioners
+- real speech + speaker-separation pipeline via `SPEECH_PIPELINE_URL`
+- real OpenAI-compatible clinical extraction via `LLM_BASE_URL`
 
-Local execution is **real-data only**.
-
-- Patients, practitioners and encounters come from the real MIS upstream API.
-- Microphone audio is real browser MediaRecorder audio.
-- Speech recognition and diarization use configured real provider endpoints or local self-hosted services.
-- Clinical field extraction uses a configured real LLM endpoint.
-- There is no deterministic/demo transcript fallback and no seeded demo patient source.
+If any required provider is not configured, the affected workflow fails explicitly with a configuration error. No synthetic patients, fake transcript, or demo AI response is generated.
 
 No Cloudflare and no Supabase.
 
