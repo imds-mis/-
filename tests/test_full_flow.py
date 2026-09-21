@@ -179,6 +179,14 @@ def test_doctor_profile_specialty_grants_template_access_automatically(tmp_path:
     assert eligible.status_code == 200, eligible.text
     assert [row["id"] for row in eligible.json()["data"]] == [template["id"]]
 
+    created_document = client.post("/v1/doctor/documents", headers=doctor, json={
+        "template_id": template["id"],
+        "patient_id": "patient-1",
+        "visit_type": None,
+        "system_values": {}
+    })
+    assert created_document.status_code == 201, created_document.text
+
     wrong = dict(doctor)
     wrong["X-Practitioner-ID"] = "doctor-2"
     assert client.get("/v1/doctor/templates", headers=wrong).json()["data"] == []
