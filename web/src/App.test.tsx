@@ -7,14 +7,19 @@ describe("MIS medical documents UI", () => {
     window.history.pushState({}, "", "/doctor");
   });
 
-  afterEach(() => {
-    cleanup();
-  });
+  afterEach(() => cleanup());
 
-  it("shows the two real workspaces in navigation", () => {
+  it("shows the two clinical workspaces in navigation", () => {
     render(<App />);
     expect(screen.getByRole("link", { name: /Кабинет врача/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Шаблоны/i })).toBeInTheDocument();
+  });
+
+  it("keeps technical MIS identifiers out of the main clinical UI", () => {
+    render(<App />);
+    expect(screen.queryByText(/Tenant UUID/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Practitioner UUID/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Подключение/i })).toBeInTheDocument();
   });
 
   it("renders doctor workspace at /doctor without demo labels", () => {
@@ -23,9 +28,13 @@ describe("MIS medical documents UI", () => {
     expect(screen.queryByText(/demo/i)).not.toBeInTheDocument();
   });
 
-  it("renders template settings at /settings/templates", () => {
+  it("renders template settings without raw JSON editor", () => {
     window.history.pushState({}, "", "/settings/templates");
     render(<App />);
-    expect(screen.getByRole("heading", { name: /Шаблоны документов/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Медицинские шаблоны/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Поля шаблона \(JSON\)/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Специальность/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Тип приема/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Доступ для врача/i)).toBeInTheDocument();
   });
 });
