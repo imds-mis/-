@@ -24,8 +24,8 @@
 ## 1. Локальный запуск
 
 ```bash
-git clone https://github.com/imds-mis/-.git
-cd -
+git clone https://github.com/imds-mis/-.git imds-medical-documents
+cd imds-medical-documents
 git checkout feat/medical-document-service
 cp .env.example .env
 ```
