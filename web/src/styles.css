@@ -492,3 +492,45 @@ main { padding: 28px; }
     border-radius: 10px;
   }
 }
+
+
+/* Local patient registry */
+.patient-selector-block {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.patient-selector-block > button {
+  white-space: nowrap;
+  height: 40px;
+}
+
+.local-patient-form {
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px solid #d9e3e8;
+  border-radius: 12px;
+  background: #f8fbfc;
+}
+
+.local-patient-form .form-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+@media (max-width: 900px) {
+  .patient-selector-block {
+    grid-template-columns: 1fr;
+  }
+
+  .local-patient-form .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .local-patient-form .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
