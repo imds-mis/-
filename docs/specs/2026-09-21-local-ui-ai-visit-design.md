@@ -11,7 +11,7 @@ Add a local browser UI on top of the existing Medical Document Service with two 
 1. **Settings → Templates** for administrators.
 2. **Doctor Cabinet** for clinical use.
 
-The local environment must start with Docker Compose and allow an end-to-end demonstration:
+The local environment must start with Docker Compose and allow an end-to-end real-data workflow:
 
 ```text
 Admin uploads DOCX once
@@ -62,11 +62,13 @@ The backend exposes provider-neutral interfaces:
 - `SpeakerDiarizationAdapter`
 - `ClinicalFieldExtractionAdapter`
 
-Local demo supports two modes:
+Local execution is **real-data only**.
 
-**AI mode** — uses configured self-hosted/compatible endpoints.
-
-**Demo mode** — deterministic local simulation, so the full UI can be demonstrated even when a speech/LLM model is not installed. Demo mode must be visibly labeled and must never be confused with production AI.
+- Patients, practitioners and encounters come from the real MIS upstream API.
+- Microphone audio is real browser MediaRecorder audio.
+- Speech recognition and diarization use configured real provider endpoints or local self-hosted services.
+- Clinical field extraction uses a configured real LLM endpoint.
+- There is no deterministic/demo transcript fallback and no seeded demo patient source.
 
 No Cloudflare and no Supabase.
 
@@ -132,10 +134,6 @@ v1 published
 
 Old patient documents remain pinned to their original template version.
 
-### Demo convenience
-
-The UI includes an optional built-in example template generator only for local development, so the user can test the flow without finding a DOCX first.
-
 ## 4. Screen B — Doctor Cabinet
 
 Route:
@@ -148,14 +146,9 @@ Main sections:
 
 ### Patient context
 
-For local demo:
+Patient context is loaded from the configured real MIS upstream API using the authenticated upstream bearer token and branch scope.
 
-- patient selector
-- patient full name
-- IIN / identifier placeholder
-- visit type
-
-Production integration later consumes patient/encounter context from the main MIS.
+The local UI does not create fake patients.
 
 ### Template selector
 
@@ -401,9 +394,7 @@ IMDS Medical Documents
 Doctor Cabinet | Settings / Templates
 ```
 
-For local demo role switching is explicit.
-
-Production integration will derive permissions from platform authentication instead of a UI toggle.
+Local access still uses explicit role routes, but patient/practitioner data and clinical context come from the real MIS API.
 
 ## 12. Visit session data model
 
@@ -502,19 +493,16 @@ Output:
 
 No adapter can finalize a document.
 
-## 15. Demo mode
+## 15. Real AI runtime
 
-`AI_MODE=demo` is supported for local UI verification.
+Required runtime integrations:
 
-In demo mode:
+- `MIS_UPSTREAM_URL` — real MIS API base URL.
+- `MIS_AUTH_TOKEN` — bearer token used by the local backend to call the real MIS API.
+- `SPEECH_PIPELINE_URL` — real STT + speaker diarization endpoint.
+- `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` — real clinical extraction endpoint.
 
-- microphone can still record
-- audio is accepted but not sent externally
-- backend emits a deterministic sample doctor/patient transcript
-- sample transcript fills the currently selected template fields
-- UI clearly displays `DEMO AI`
-
-This allows the user to test the complete product workflow locally before installing production speech/diarization models.
+If one of these required integrations is unavailable, the corresponding workflow returns an explicit configuration error. The system must not synthesize fake clinical content.
 
 ## 16. Docker Compose
 
@@ -548,7 +536,7 @@ The local build is accepted when all of the following work from a clean checkout
 4. The template remains available after page reload.
 5. Doctor Cabinet shows the template for the configured specialty.
 6. Doctor starts a visit and grants microphone permission.
-7. Transcript UI shows doctor/patient turns in AI or demo mode.
+7. Transcript UI shows doctor/patient turns from the real speech/diarization pipeline.
 8. Template fields receive AI draft suggestions.
 9. Doctor can accept/edit suggestions.
 10. Doctor can search and select ICD-10.
@@ -570,4 +558,4 @@ The local build is accepted when all of the following work from a clean checkout
 - arbitrary WYSIWYG Word editor
 - deployment to production infrastructure
 
-These are intentionally excluded from the local two-screen demonstration.
+These are intentionally excluded from this local real-data implementation.
