@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  createTemplateVersion,
   disableTemplate,
   getTemplates,
   LocalContext,
@@ -54,6 +55,7 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
   const [file, setFile] = useState<File | null>(null);
   const [fieldsJson, setFieldsJson] = useState(JSON.stringify(defaultFields, null, 2));
   const [status, setStatus] = useState("");
+  const [versionFiles, setVersionFiles] = useState<Record<string, File | null>>({});
 
   const contextReady = useMemo(
     () => Boolean(context.tenantId && context.userId && context.branchId),
@@ -182,6 +184,36 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
                   </div>
 
                   <div className="actions">
+                    {template.active && latest && (
+                      <>
+                        <input
+                          className="compact-file"
+                          type="file"
+                          accept=".docx"
+                          onChange={(event) => setVersionFiles({
+                            ...versionFiles,
+                            [template.id]: event.target.files?.[0] || null
+                          })}
+                        />
+                        <button
+                          disabled={!versionFiles[template.id]}
+                          onClick={async () => {
+                            const nextFile = versionFiles[template.id];
+                            if (!nextFile) return;
+                            await createTemplateVersion(
+                              context,
+                              template.id,
+                              nextFile,
+                              latest.fields || []
+                            );
+                            setVersionFiles({ ...versionFiles, [template.id]: null });
+                            await refresh();
+                          }}
+                        >
+                          Новая версия
+                        </button>
+                      </>
+                    )}
                     {latest?.status !== "published" && template.active && (
                       <button
                         className="primary"
