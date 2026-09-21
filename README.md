@@ -1,18 +1,27 @@
-# IMDS Medical Documents
+# IMDS Medical Document Service
 
-Portable MIS medical-document module with:
+Локальный модуль медицинских документов для MIS.
 
-- **Settings → Templates** — persistent DOCX templates, versions, assignments and publishing.
-- **Doctor Cabinet** — real MIS patient selection, template selection, microphone capture, doctor/patient transcript, AI field suggestions, ICD-10, clinical protocols, PDF/DOCX and QR verification.
-- PostgreSQL persistence.
-- Local LibreOffice rendering.
-- No Cloudflare.
-- No Supabase.
-- No demo patients or fabricated transcript mode.
+## Что работает
 
-## Local start
+- постоянные DOCX-шаблоны с версиями;
+- назначение шаблонов по специальности / врачу / филиалу / типу приема;
+- реальный список пациентов из upstream MIS;
+- кабинет врача;
+- запись разговора через браузерный микрофон;
+- реальный внешний/self-hosted STT + speaker diarization pipeline;
+- разделение реплик на `doctor` / `patient`;
+- AI-черновики полей выбранного протокола осмотра;
+- врач вручную принимает или редактирует AI-черновик;
+- МКБ-10 и клинические протоколы;
+- DOCX → PDF через LibreOffice;
+- SHA-256 и signed QR;
+- PDF/DOCX скачивание и печать;
+- финальный документ не перегенерируется после завершения.
 
-Clone and open the feature branch:
+В коде нет demo-пациентов и deterministic demo AI fallback.
+
+## 1. Локальный запуск
 
 ```bash
 git clone https://github.com/imds-mis/-.git
@@ -21,34 +30,36 @@ git checkout feat/medical-document-service
 cp .env.example .env
 ```
 
-Fill the real integration values in `.env`:
+Заполните в `.env` реальные значения:
 
 ```env
 MIS_UPSTREAM_URL=https://mis.imds.kz
-MIS_AUTH_TOKEN=<real MIS bearer token>
+MIS_AUTH_TOKEN=<действующий bearer token>
 
 SPEECH_PIPELINE_URL=http://host.docker.internal:9000
 
 LLM_BASE_URL=http://host.docker.internal:11434/v1
-LLM_API_KEY=<real provider key>
-LLM_MODEL=<model name>
+LLM_API_KEY=<ключ вашего real/self-hosted endpoint>
+LLM_MODEL=<имя модели>
 
-QR_SIGNING_SECRET=<long random secret>
+QR_SIGNING_SECRET=<длинная случайная строка>
 ```
 
-Then run:
+Затем:
 
 ```bash
 docker compose up --build
 ```
 
-Open:
+Открыть:
 
-- **Doctor Cabinet:** http://localhost:5173/doctor
-- **Settings → Templates:** http://localhost:5173/settings/templates
-- **API health:** http://localhost:8080/healthz
+- Кабинет врача: http://localhost:5173/doctor
+- Настройки шаблонов: http://localhost:5173/settings/templates
+- API health: http://localhost:8080/healthz
 
-The browser UI asks for the real MIS context values:
+## 2. Реальный MIS контекст
+
+В верхней панели локального UI указываются реальные:
 
 - Tenant UUID
 - User UUID
@@ -56,42 +67,72 @@ The browser UI asks for the real MIS context values:
 - Practitioner UUID
 - Specialty code
 
-These are used only against the local service. The upstream bearer token stays on the backend in `.env` and is never sent to the browser.
-
-## Real MIS data
-
-The backend proxies the existing MIS endpoints:
+Пациенты после этого загружаются из:
 
 ```text
-GET /api/products/mis/v1/patients
-GET /api/products/mis/v1/patients/:patientId
-GET /api/products/mis/v1/practitioners
+GET https://mis.imds.kz/api/products/mis/v1/patients?branch_id=<branch>
 ```
 
-The local browser uses:
+через backend proxy. `MIS_AUTH_TOKEN` никогда не передается в браузер.
+
+## 3. Настройки → Шаблоны
+
+1. Откройте http://localhost:5173/settings/templates
+2. Укажите реальный MIS контекст.
+3. Выберите DOCX.
+4. Укажите название.
+5. Проверьте JSON полей.
+6. Нажмите **Загрузить шаблон**.
+7. После загрузки нажмите **Опубликовать**.
+
+Исходный DOCX остается сохраненным. Изменения выпускаются новой версией. Старые документы пациентов остаются на старой версии.
+
+### Placeholder-ы DOCX
+
+Пример:
 
 ```text
-GET /v1/integrations/mis/patients
-GET /v1/integrations/mis/patients/:patientId
-GET /v1/integrations/mis/practitioners
+Пациент: {{patient.full_name}}
+Жалобы: {{complaints}}
+Анамнез: {{anamnesis_morbi}}
+Объективный статус: {{objective_status}}
+Диагноз: {{diagnosis_text}}
+Рекомендации: {{recommendations}}
 ```
 
-No local patient seeds are created.
+## 4. Кабинет врача
 
-## Real speech + speaker separation contract
+1. Откройте http://localhost:5173/doctor
+2. Укажите реальные tenant/user/branch/practitioner UUID.
+3. Выберите пациента из MIS.
+4. Выберите опубликованный шаблон.
+5. Нажмите **Начать прием и включить микрофон**.
+6. Разрешите доступ к микрофону.
+7. Аудио отправляется чанками в real speech pipeline.
+8. На экране появляются реплики **Врач / Пациент**.
+9. LLM возвращает предложения только по полям шаблона.
+10. Врач нажимает **Принять AI-черновик** либо вводит текст сам.
+11. Выбирает МКБ-10 и клинический протокол.
+12. Нажимает **Завершить прием и сформировать документ**.
+13. После этого доступны PDF, DOCX, печать и QR-проверка.
 
-`SPEECH_PIPELINE_URL` must point to a real service that accepts audio and returns speaker-separated turns.
+## 5. Контракт speech pipeline
 
-Chunk request:
+`SPEECH_PIPELINE_URL` должен предоставлять:
 
-```http
-POST {SPEECH_PIPELINE_URL}/transcribe
+### POST /transcribe
+
+Raw audio body.
+
+Headers:
+
+```text
 Content-Type: audio/webm
 X-Session-ID: <uuid>
-X-Chunk-ID: <unique chunk id>
+X-Chunk-ID: <unique-id>
 ```
 
-Response:
+Ответ:
 
 ```json
 {
@@ -101,87 +142,71 @@ Response:
       "text": "Что вас беспокоит?",
       "confidence": 0.97,
       "started_ms": 0,
-      "ended_ms": 1600
+      "ended_ms": 2400
     },
     {
       "speaker": "patient",
-      "text": "Боль внизу живота второй день.",
-      "confidence": 0.94,
-      "started_ms": 1700,
-      "ended_ms": 4400
+      "text": "Боль внизу живота два дня.",
+      "confidence": 0.95,
+      "started_ms": 2600,
+      "ended_ms": 6100
     }
   ]
 }
 ```
 
-When the conversation finishes:
+### POST /finalize
 
-```http
-POST {SPEECH_PIPELINE_URL}/finalize
+Header:
+
+```text
 X-Session-ID: <uuid>
 ```
 
-The final response uses the same `turns` structure. The service rejects speaker labels other than `doctor` or `patient` so an unclassified speaker cannot silently become a clinical role.
+Возвращает финальную speaker-separated расшифровку всего приема.
 
-Raw audio is not persisted by this module.
+Если speech provider не настроен, сервис возвращает явный 503. Фиктивной расшифровки нет.
 
-## Real clinical extraction
+## 6. LLM extraction
 
-`LLM_BASE_URL` is an OpenAI-compatible API base ending before `/chat/completions`, for example:
-
-```text
-http://host.docker.internal:11434/v1
-```
-
-The extraction engine receives:
-
-- declared template fields;
-- real transcript turns;
-- patient/system context.
-
-It may return only suggestions for declared fields. Unsupported fields and unsupported evidence indexes are rejected. AI suggestions remain drafts until the doctor explicitly accepts or edits them.
-
-## Template workflow
-
-1. Open **Settings → Templates**.
-2. Upload a DOCX.
-3. Define structured fields.
-4. Publish the template.
-5. The template remains until disabled.
-6. A changed template is added as a new version.
-7. Old patient documents stay pinned to their original template version.
-
-Example placeholders:
+`LLM_BASE_URL` должен быть OpenAI-compatible и поддерживать:
 
 ```text
-{{patient.full_name}}
-{{complaints}}
-{{anamnesis_morbi}}
-{{objective_status}}
-{{diagnosis_text}}
-{{recommendations}}
+POST /chat/completions
 ```
 
-## Doctor workflow
+Модель получает:
 
-1. Open **Doctor Cabinet**.
-2. Enter the real tenant/user/branch/practitioner/specialty context.
-3. Select a real patient from MIS.
-4. Select an eligible published examination template.
-5. Click **Начать прием и включить микрофон**.
-6. The browser sends real microphone chunks to the configured speech service.
-7. Transcript appears as **Врач / Пациент**.
-8. AI creates field-scoped draft suggestions.
-9. Doctor accepts, edits or ignores them.
-10. Doctor searches ICD-10 and selects the canonical code.
-11. Matching published clinical protocols are shown.
-12. Doctor completes missing fields.
-13. Finalization freezes immutable DOCX/PDF, SHA-256 and QR verification.
+- разрешенные поля текущего шаблона;
+- transcript;
+- системные данные пациента;
+- инструкции не придумывать отсутствующие сведения.
 
-## ICD-10
+Результат хранится только как suggestion, пока врач его не примет.
 
-The repository intentionally does not bundle an ICD-10 dataset. Import only a dataset your organization is authorized to use.
+## 7. Безопасность
 
-## Security note
+- upstream MIS token остается только на backend;
+- QR не содержит PHI;
+- finalized PDF/DOCX immutable;
+- tenant/branch фильтрация применяется к медицинским документам и visit sessions;
+- raw audio не сохраняется модулем документов;
+- публичный QR endpoint проверяет token hash и SHA-256 сохраненного PDF;
+- локальные UUID должны быть реальными данными вашей MIS.
 
-The local context fields are acceptable for isolated development only. In production, tenant/user/branch/practitioner context must come from authenticated platform-core/gateway context and not from user-controlled browser headers.
+## 8. Тесты
+
+Backend:
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+Frontend:
+
+```bash
+cd web
+npm install
+npm test
+npm run build
+```
