@@ -234,3 +234,43 @@ export async function finalizeDocument(context: LocalContext, documentId: string
 export function absoluteApiUrl(path: string): string {
   return path.startsWith("http") ? path : API_BASE + path;
 }
+
+
+export async function fetchArtifact(context: LocalContext, path: string): Promise<Blob> {
+  const response = await fetch(absoluteApiUrl(path), {
+    headers: requestHeaders(context, false)
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || body.error || ("HTTP " + response.status));
+  }
+  return response.blob();
+}
+
+export async function downloadArtifact(
+  context: LocalContext,
+  path: string,
+  filename: string
+): Promise<void> {
+  const blob = await fetchArtifact(context, path);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function printPdf(context: LocalContext, path: string): Promise<void> {
+  const blob = await fetchArtifact(context, path);
+  const url = URL.createObjectURL(blob);
+  const popup = window.open(url, "_blank");
+  if (!popup) {
+    URL.revokeObjectURL(url);
+    throw new Error("Браузер заблокировал окно печати");
+  }
+  popup.addEventListener("load", () => popup.print(), { once: true });
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
