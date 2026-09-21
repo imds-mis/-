@@ -245,3 +245,40 @@ def test_clinic_header_settings_and_real_template_preview(tmp_path: Path):
     preview = client.get(f"/v1/admin/templates/{template['id']}/preview.pdf", headers=h)
     assert preview.status_code == 200, preview.text
     assert preview.content.startswith(b"%PDF")
+
+
+def test_local_patient_registry_works_without_mis_upstream(tmp_path: Path):
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path/'patients.db'}",
+        storage_root=tmp_path/"storage",
+        qr_secret="s",
+        public_base_url="http://testserver",
+        stt_url=None,
+        mis_upstream_url=None,
+        mis_auth_token=None,
+    )
+    client = TestClient(app)
+    h = {
+        "X-Tenant-ID":"local-tenant",
+        "X-User-ID":"local-user",
+        "X-Branch-ID":"local-branch",
+        "X-Practitioner-ID":"local-doctor-1",
+        "X-Specialty-Code":"GYNE",
+    }
+
+    created = client.post("/v1/local/patients", headers=h, json={
+        "first_name":"Анна",
+        "last_name":"Иванова",
+        "middle_name":"Сергеевна",
+        "iin":"900101123456",
+        "medical_record_number":"MR-001",
+        "date_of_birth":"1990-01-01",
+        "phone":"+77000000000",
+    })
+    assert created.status_code == 201, created.text
+    patient = created.json()["data"]
+    assert patient["first_name"] == "Анна"
+
+    rows = client.get("/v1/local/patients", headers=h)
+    assert rows.status_code == 200
+    assert [item["id"] for item in rows.json()["data"]] == [patient["id"]]
