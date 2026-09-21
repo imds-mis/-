@@ -6,6 +6,14 @@ export type LocalContext = {
   specialtyCode: string;
 };
 
+export type Practitioner = {
+  id: string;
+  practitioner_number?: string | null;
+  first_name: string;
+  last_name: string;
+  middle_name?: string | null;
+};
+
 export type Patient = {
   id: string;
   medical_record_number?: string | null;
@@ -92,6 +100,11 @@ async function parse<T>(response: Response): Promise<T> {
     throw new Error(body.detail || body.error || ("HTTP " + response.status));
   }
   return response.json() as Promise<T>;
+}
+
+export async function getPractitioners(context: LocalContext): Promise<Practitioner[]> {
+  const response = await fetch(API_BASE + "/v1/integrations/mis/practitioners", { headers: requestHeaders(context, false) });
+  return (await parse<{ data: Practitioner[] }>(response)).data;
 }
 
 export async function getPatients(context: LocalContext): Promise<Patient[]> {
