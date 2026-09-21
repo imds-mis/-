@@ -1,10 +1,12 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 describe("MIS medical documents UI", () => {
   beforeEach(() => {
     window.history.pushState({}, "", "/doctor");
+    localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   afterEach(() => cleanup());
@@ -37,4 +39,37 @@ describe("MIS medical documents UI", () => {
     expect(screen.getByLabelText(/Тип приема/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Доступ для врача/i)).toBeInTheDocument();
   });
+});
+
+
+it("shows saved templates even when practitioner loading fails", async () => {
+  localStorage.setItem("imds.tenantId", "t1");
+  localStorage.setItem("imds.userId", "u1");
+  localStorage.setItem("imds.branchId", "b1");
+  window.history.pushState({}, "", "/settings/templates");
+
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/v1/admin/templates")) {
+      return new Response(JSON.stringify({
+        data: [{
+          id: "template-1",
+          name: "Осмотр",
+          active: true,
+          versions: [{ id: "v1", version: 1, status: "draft", fields: [] }],
+          assignments: []
+        }]
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/v1/integrations/mis/practitioners")) {
+      return new Response(JSON.stringify({ detail: "MIS unavailable" }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  expect(await screen.findByText("Осмотр")).toBeInTheDocument();
 });
