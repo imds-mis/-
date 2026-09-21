@@ -179,14 +179,14 @@
 - [ ] Add compose config with `web`, `api`, `postgres`, persistent DB and document-storage volumes.
 - [ ] Add API healthcheck and frontend reverse/static serving.
 - [ ] Add CI frontend install/test/build plus backend suite.
-- [ ] Document exact local commands and demo flow.
+- [ ] Document exact local commands and real-data flow.
 - [ ] Run CI on the branch and confirm success.
 - [ ] Commit `chore: add one-command local real-data run stack`.
 
 ### Task 8: End-to-end verification
 
 **Files:**
-- Create: `docs/local-demo-checklist.md`
+- Create: `docs/local-real-data-checklist.md`
 
 - [ ] Verify clean local sequence: clone → checkout branch → `docker compose up --build`.
 - [ ] Verify Settings/Templates upload/publish flow.
@@ -195,8 +195,8 @@
 - [ ] Verify PDF/DOCX download and print.
 - [ ] Verify QR opens the same immutable PDF.
 - [ ] Verify page reload preserves template and finalized document state.
-- [ ] Record exact verification steps in `docs/local-demo-checklist.md`.
-- [ ] Commit `test: document local end-to-end demo verification`.
+- [ ] Record exact verification steps in `docs/local-real-data-checklist.md`.
+- [ ] Commit `test: document local end-to-end real-data verification`.
 
 
 ## Real-data integration amendment
