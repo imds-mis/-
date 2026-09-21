@@ -130,6 +130,24 @@ export async function uploadTemplate(
   await parse(response);
 }
 
+
+export async function createTemplateVersion(
+  context: LocalContext,
+  templateId: string,
+  file: File,
+  fields: TemplateField[]
+): Promise<void> {
+  const form = new FormData();
+  form.set("fields_json", JSON.stringify(fields));
+  form.set("file", file);
+  const response = await fetch(API_BASE + "/v1/admin/templates/" + templateId + "/versions", {
+    method: "POST",
+    headers: requestHeaders(context, false),
+    body: form
+  });
+  await parse(response);
+}
+
 export async function publishTemplate(context: LocalContext, templateId: string): Promise<void> {
   const response = await fetch(API_BASE + "/v1/admin/templates/" + templateId + "/publish", {
     method: "POST",
