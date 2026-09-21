@@ -165,3 +165,18 @@ class ClinicHeader(Base):
     footer_text: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     logo_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class LocalPatient(Base):
+    __tablename__ = "local_patients"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True)
+    branch_id: Mapped[str] = mapped_column(String(100), index=True)
+    first_name: Mapped[str] = mapped_column(String(200))
+    last_name: Mapped[str] = mapped_column(String(200))
+    middle_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    iin: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    medical_record_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    date_of_birth: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
