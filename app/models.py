@@ -95,3 +95,46 @@ class ProtocolVersion(Base):
     effective_from: Mapped[str | None] = mapped_column(String(20), nullable=True)
     effective_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+
+class AiVisitSession(Base):
+    __tablename__ = "ai_visit_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True)
+    branch_id: Mapped[str] = mapped_column(String(100), index=True)
+    patient_id: Mapped[str] = mapped_column(String(100), index=True)
+    practitioner_id: Mapped[str] = mapped_column(String(100), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("medical_documents.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="recording")
+    received_chunk_ids: Mapped[list] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AiTranscriptTurn(Base):
+    __tablename__ = "ai_transcript_turns"
+    __table_args__ = (UniqueConstraint("session_id", "sequence_no"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("ai_visit_sessions.id"), index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer)
+    speaker: Mapped[str] = mapped_column(String(30))
+    text: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    started_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ended_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class AiFieldSuggestion(Base):
+    __tablename__ = "ai_field_suggestions"
+    __table_args__ = (UniqueConstraint("session_id", "field_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("ai_visit_sessions.id"), index=True)
+    field_id: Mapped[str] = mapped_column(String(200))
+    value_json: Mapped[dict] = mapped_column(JSON)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    evidence_turn_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="suggested")
