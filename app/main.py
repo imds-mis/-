@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalogs import parse_icd_csv
 from .context import RequestContext, get_context
 from .domain import template_is_eligible
-from .models import Base, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
+from .models import Base, DoctorProfile, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
 from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
@@ -38,6 +38,12 @@ class CreateDocumentBody(BaseModel):
 
 class UpdateFieldsBody(BaseModel):
     values: dict[str, Any]
+
+
+class DoctorProfileBody(BaseModel):
+    practitioner_id: str
+    display_name: str | None = None
+    specialty_codes: list[str] = Field(default_factory=list)
 
 
 class ProtocolBody(BaseModel):
@@ -201,6 +207,62 @@ def create_app(
         if not data:
             raise HTTPException(404, "patient not found")
         return {"data": data}
+
+    @app.post("/v1/admin/doctor-profiles", status_code=201)
+    def create_doctor_profile(
+        body: DoctorProfileBody,
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        if not body.specialty_codes:
+            raise HTTPException(400, "at least one specialty code is required")
+        existing = session.scalar(select(DoctorProfile).where(
+            DoctorProfile.tenant_id == ctx.tenant_id,
+            DoctorProfile.practitioner_id == body.practitioner_id,
+        ))
+        normalized = sorted({code.strip().upper() for code in body.specialty_codes if code.strip()})
+        if existing:
+            existing.display_name = body.display_name
+            existing.specialty_codes = normalized
+            existing.branch_id = ctx.branch_id
+            existing.active = True
+            profile = existing
+        else:
+            profile = DoctorProfile(
+                id=str(uuid.uuid4()),
+                tenant_id=ctx.tenant_id,
+                branch_id=ctx.branch_id,
+                practitioner_id=body.practitioner_id,
+                display_name=body.display_name,
+                specialty_codes=normalized,
+                active=True,
+            )
+            session.add(profile)
+        session.commit()
+        return {"data": {
+            "id": profile.id,
+            "practitioner_id": profile.practitioner_id,
+            "display_name": profile.display_name,
+            "specialty_codes": profile.specialty_codes,
+            "active": profile.active,
+        }}
+
+    @app.get("/v1/admin/doctor-profiles")
+    def list_doctor_profiles(
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        rows = session.scalars(select(DoctorProfile).where(
+            DoctorProfile.tenant_id == ctx.tenant_id,
+            DoctorProfile.active.is_(True),
+        ).order_by(DoctorProfile.display_name, DoctorProfile.practitioner_id)).all()
+        return {"data": [{
+            "id": row.id,
+            "practitioner_id": row.practitioner_id,
+            "display_name": row.display_name,
+            "specialty_codes": row.specialty_codes,
+            "branch_id": row.branch_id,
+        } for row in rows]}
 
     @app.get("/v1/admin/templates")
     def list_templates(
@@ -369,6 +431,12 @@ def create_app(
     def eligible_templates(visit_type: str | None = None, ctx: RequestContext = Depends(get_context), session: Session = Depends(db)):
         if not ctx.practitioner_id:
             raise HTTPException(400, "practitioner context required")
+        profile = session.scalar(select(DoctorProfile).where(
+            DoctorProfile.tenant_id == ctx.tenant_id,
+            DoctorProfile.practitioner_id == ctx.practitioner_id,
+            DoctorProfile.active.is_(True),
+        ))
+        profile_specialties = profile.specialty_codes if profile else []
         templates = session.scalars(select(Template).where(Template.tenant_id == ctx.tenant_id, Template.active.is_(True))).all()
         out = []
         for template in templates:
@@ -383,7 +451,16 @@ def create_app(
                 TemplateAssignment.tenant_id == ctx.tenant_id,
             )).all()
             rows = [{"specialty_code": a.specialty_code, "branch_id": a.branch_id, "practitioner_id": a.practitioner_id, "visit_type": a.visit_type} for a in assignments]
-            if rows and not template_is_eligible(rows, specialty_code=ctx.specialty_code, branch_id=ctx.branch_id, practitioner_id=ctx.practitioner_id, visit_type=visit_type):
+            eligible = False
+            candidate_specialties = profile_specialties or ([ctx.specialty_code] if ctx.specialty_code else [])
+            if not rows:
+                eligible = True
+            else:
+                for specialty in candidate_specialties or [None]:
+                    if template_is_eligible(rows, specialty_code=specialty, branch_id=ctx.branch_id, practitioner_id=ctx.practitioner_id, visit_type=visit_type):
+                        eligible = True
+                        break
+            if not eligible:
                 continue
             out.append({"id": template.id, "name": template.name, "version": latest.version, "fields": latest.fields})
         return {"data": out}
