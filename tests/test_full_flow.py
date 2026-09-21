@@ -126,3 +126,59 @@ def test_published_template_change_creates_new_version_and_old_document_keeps_sn
     second = client.post("/v1/doctor/documents", headers=h, json={"template_id":t,"patient_id":"p2"}).json()["data"]
     assert second["template_version"] == 2
     assert first["template_version"] == 1
+
+
+def test_doctor_profile_specialty_grants_template_access_automatically(tmp_path: Path):
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path/'profile.db'}",
+        storage_root=tmp_path/"storage",
+        qr_secret="s",
+        public_base_url="http://testserver",
+        stt_url=None,
+    )
+    client = TestClient(app)
+
+    admin = {
+        "X-Tenant-ID": "t1",
+        "X-User-ID": "admin",
+        "X-Branch-ID": "b1",
+        "X-Practitioner-ID": "admin-p",
+    }
+    doctor = {
+        "X-Tenant-ID": "t1",
+        "X-User-ID": "doctor-user",
+        "X-Branch-ID": "b1",
+        "X-Practitioner-ID": "doctor-1",
+    }
+
+    profile = client.post("/v1/admin/doctor-profiles", headers=admin, json={
+        "practitioner_id": "doctor-1",
+        "display_name": "Иванова Анна",
+        "specialty_codes": ["GYNE"]
+    })
+    assert profile.status_code == 201, profile.text
+
+    source = tmp_path/"gyne.docx"
+    d = Document()
+    d.add_paragraph("Жалобы: {{complaints}}")
+    d.save(source)
+
+    template = client.post(
+        "/v1/admin/templates",
+        headers=admin,
+        files={"file": ("gyne.docx", source.read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={
+            "name": "Осмотр гинеколога",
+            "fields_json": json.dumps([{"id":"complaints","type":"textarea"}]),
+            "assignments_json": json.dumps([{"specialty_code":"GYNE","branch_id":"b1"}]),
+        }
+    ).json()["data"]
+    client.post(f"/v1/admin/templates/{template['id']}/publish", headers=admin)
+
+    eligible = client.get("/v1/doctor/templates", headers=doctor)
+    assert eligible.status_code == 200, eligible.text
+    assert [row["id"] for row in eligible.json()["data"]] == [template["id"]]
+
+    wrong = dict(doctor)
+    wrong["X-Practitioner-ID"] = "doctor-2"
+    assert client.get("/v1/doctor/templates", headers=wrong).json()["data"] == []
