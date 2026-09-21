@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select
@@ -21,6 +22,9 @@ from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
 from .storage import LocalStorage
+from .ai_visit import ClinicalExtractionClient, SpeechPipelineClient
+from .upstream import MisUpstreamClient
+from .visit_sessions import register_visit_session_routes
 
 
 class CreateDocumentBody(BaseModel):
@@ -55,6 +59,13 @@ def create_app(
     public_base_url: str,
     stt_url: str | None,
     stt_callable: Callable[[bytes, str], str] | None = None,
+    mis_upstream_url: str | None = None,
+    mis_auth_token: str | None = None,
+    speech_pipeline_url: str | None = None,
+    llm_base_url: str | None = None,
+    llm_api_key: str | None = None,
+    llm_model: str | None = None,
+    cors_origins: list[str] | None = None,
 ) -> FastAPI:
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     engine = create_engine(database_url, future=True, connect_args=connect_args)
@@ -62,14 +73,46 @@ def create_app(
     SessionLocal = sessionmaker(engine, expire_on_commit=False)
     storage = LocalStorage(storage_root)
     effective_stt = stt_callable or (make_http_stt(stt_url) if stt_url else None)
+    upstream_client = (
+        MisUpstreamClient(mis_upstream_url, mis_auth_token)
+        if mis_upstream_url and mis_auth_token
+        else None
+    )
+    speech_client = SpeechPipelineClient(speech_pipeline_url) if speech_pipeline_url else None
+    extraction_client = (
+        ClinicalExtractionClient(
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            model=llm_model,
+        )
+        if llm_base_url and llm_api_key and llm_model
+        else None
+    )
 
-    app = FastAPI(title="IMDS Medical Document Service", version="0.1.0")
+    app = FastAPI(title="IMDS Medical Document Service", version="0.2.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins or ["http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.engine = engine
     app.state.SessionLocal = SessionLocal
     app.state.storage = storage
     app.state.qr_secret = qr_secret
     app.state.public_base_url = public_base_url.rstrip("/")
     app.state.stt = effective_stt
+    app.state.upstream = upstream_client
+    app.state.speech_client = speech_client
+    app.state.extraction_client = extraction_client
+
+    register_visit_session_routes(
+        app,
+        SessionLocal,
+        speech_client=speech_client,
+        extraction_client=extraction_client,
+    )
 
     def db():
         session = SessionLocal()
@@ -112,6 +155,97 @@ def create_app(
     @app.get("/healthz")
     def health():
         return {"status": "ok", "service": "medical-document-service"}
+
+    @app.get("/v1/integrations/mis/patients")
+    def upstream_patients(
+        ctx: RequestContext = Depends(get_context),
+    ):
+        if upstream_client is None:
+            raise HTTPException(503, "real MIS upstream is not configured")
+        if not ctx.branch_id:
+            raise HTTPException(400, "branch context required")
+        try:
+            data = upstream_client.list_patients(ctx.branch_id)
+        except Exception as exc:
+            raise HTTPException(502, "MIS upstream patient request failed") from exc
+        return {"data": data}
+
+    @app.get("/v1/integrations/mis/practitioners")
+    def upstream_practitioners(
+        ctx: RequestContext = Depends(get_context),
+    ):
+        if upstream_client is None:
+            raise HTTPException(503, "real MIS upstream is not configured")
+        if not ctx.branch_id:
+            raise HTTPException(400, "branch context required")
+        try:
+            data = upstream_client.list_practitioners(ctx.branch_id)
+        except Exception as exc:
+            raise HTTPException(502, "MIS upstream practitioner request failed") from exc
+        return {"data": data}
+
+    @app.get("/v1/integrations/mis/patients/{patient_id}")
+    def upstream_patient(
+        patient_id: str,
+        ctx: RequestContext = Depends(get_context),
+    ):
+        if upstream_client is None:
+            raise HTTPException(503, "real MIS upstream is not configured")
+        if not ctx.branch_id:
+            raise HTTPException(400, "branch context required")
+        try:
+            data = upstream_client.get_patient(patient_id, ctx.branch_id)
+        except Exception as exc:
+            raise HTTPException(502, "MIS upstream patient request failed") from exc
+        if not data:
+            raise HTTPException(404, "patient not found")
+        return {"data": data}
+
+    @app.get("/v1/admin/templates")
+    def list_templates(
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        templates = session.scalars(
+            select(Template)
+            .where(Template.tenant_id == ctx.tenant_id)
+            .order_by(Template.created_at.desc())
+        ).all()
+        data = []
+        for template in templates:
+            versions = session.scalars(
+                select(TemplateVersion)
+                .where(
+                    TemplateVersion.tenant_id == ctx.tenant_id,
+                    TemplateVersion.template_id == template.id,
+                )
+                .order_by(TemplateVersion.version.desc())
+            ).all()
+            assignments = session.scalars(
+                select(TemplateAssignment).where(
+                    TemplateAssignment.tenant_id == ctx.tenant_id,
+                    TemplateAssignment.template_id == template.id,
+                )
+            ).all()
+            data.append({
+                "id": template.id,
+                "name": template.name,
+                "active": template.active,
+                "created_at": template.created_at,
+                "versions": [{
+                    "id": version.id,
+                    "version": version.version,
+                    "status": version.status,
+                    "fields": version.fields,
+                } for version in versions],
+                "assignments": [{
+                    "specialty_code": a.specialty_code,
+                    "branch_id": a.branch_id,
+                    "practitioner_id": a.practitioner_id,
+                    "visit_type": a.visit_type,
+                } for a in assignments],
+            })
+        return {"data": data}
 
     @app.post("/v1/admin/templates", status_code=201)
     async def create_template(
