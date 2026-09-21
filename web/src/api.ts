@@ -21,6 +21,8 @@ export type Patient = {
   last_name: string;
   middle_name?: string | null;
   date_of_birth?: string | null;
+  iin?: string | null;
+  phone?: string | null;
 };
 
 export type TemplateField = {
@@ -117,6 +119,31 @@ export async function getPractitioners(context: LocalContext): Promise<Practitio
 export async function getPatients(context: LocalContext): Promise<Patient[]> {
   const response = await fetch(API_BASE + "/v1/integrations/mis/patients", { headers: requestHeaders(context, false) });
   return (await parse<{ data: Patient[] }>(response)).data;
+}
+
+export async function getLocalPatients(context: LocalContext): Promise<Patient[]> {
+  const response = await fetch(API_BASE + "/v1/local/patients", { headers: requestHeaders(context, false) });
+  return (await parse<{ data: Patient[] }>(response)).data;
+}
+
+export async function createLocalPatient(
+  context: LocalContext,
+  input: {
+    first_name: string;
+    last_name: string;
+    middle_name?: string;
+    iin?: string;
+    medical_record_number?: string;
+    date_of_birth?: string;
+    phone?: string;
+  }
+): Promise<Patient> {
+  const response = await fetch(API_BASE + "/v1/local/patients", {
+    method: "POST",
+    headers: requestHeaders(context),
+    body: JSON.stringify(input)
+  });
+  return (await parse<{ data: Patient }>(response)).data;
 }
 
 export async function getClinicHeader(context: LocalContext): Promise<ClinicHeaderSettings> {
