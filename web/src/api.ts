@@ -263,13 +263,14 @@ export async function disableTemplate(context: LocalContext, templateId: string)
   await parse(response);
 }
 
-export async function createDocument(context: LocalContext, templateId: string, patient: Patient) {
+export async function createDocument(context: LocalContext, templateId: string, patient: Patient, visitType?: string) {
   const response = await fetch(API_BASE + "/v1/doctor/documents", {
     method: "POST",
     headers: requestHeaders(context),
     body: JSON.stringify({
       template_id: templateId,
       patient_id: patient.id,
+      visit_type: visitType || null,
       system_values: {
         "patient.full_name": [patient.last_name, patient.first_name, patient.middle_name].filter(Boolean).join(" "),
         "patient.medical_record_number": patient.medical_record_number || "",
