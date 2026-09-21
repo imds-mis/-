@@ -22,6 +22,7 @@ from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
 from .storage import LocalStorage
+from .template_inspection import inspect_docx_fields
 from .ai_visit import ClinicalExtractionClient, SpeechPipelineClient
 from .upstream import MisUpstreamClient
 from .visit_sessions import register_visit_session_routes
@@ -246,6 +247,19 @@ def create_app(
                 } for a in assignments],
             })
         return {"data": data}
+
+    @app.post("/v1/admin/templates/inspect")
+    async def inspect_template(
+        file: UploadFile = File(...),
+        ctx: RequestContext = Depends(get_context),
+    ):
+        if not file.filename or not file.filename.lower().endswith(".docx"):
+            raise HTTPException(400, "DOCX required")
+        try:
+            fields = inspect_docx_fields(await file.read())
+        except Exception as exc:
+            raise HTTPException(400, "unable to inspect DOCX") from exc
+        return {"data": {"filename": file.filename, "fields": fields}}
 
     @app.post("/v1/admin/templates", status_code=201)
     async def create_template(
