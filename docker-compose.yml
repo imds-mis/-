@@ -35,6 +35,8 @@ services:
       - imds-documents-storage:/var/lib/imds-documents
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
