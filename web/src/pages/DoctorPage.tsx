@@ -1,0 +1,543 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  absoluteApiUrl,
+  acceptSuggestion,
+  createDocument,
+  createVisitSession,
+  FieldSuggestion,
+  finalizeDocument,
+  finishVisitSession,
+  getEligibleTemplates,
+  getPatients,
+  getProtocols,
+  LocalContext,
+  Patient,
+  searchIcd,
+  TemplateField,
+  TranscriptTurn,
+  updateDocumentFields,
+  uploadAudioChunk
+} from "../api";
+
+type EligibleTemplate = {
+  id: string;
+  name: string;
+  version: number;
+  fields: TemplateField[];
+};
+
+export default function DoctorPage({ context }: { context: LocalContext }) {
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [templates, setTemplates] = useState<EligibleTemplate[]>([]);
+  const [patientId, setPatientId] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [documentId, setDocumentId] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [suggestions, setSuggestions] = useState<FieldSuggestion[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [icdQuery, setIcdQuery] = useState("");
+  const [icdResults, setIcdResults] = useState<Array<{ code: string; title: string }>>([]);
+  const [selectedIcd, setSelectedIcd] = useState<{ code: string; title: string } | null>(null);
+  const [protocols, setProtocols] = useState<any[]>([]);
+  const [finalDocument, setFinalDocument] = useState<any>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const chunkCounter = useRef(0);
+
+  const selectedPatient = patients.find((patient) => patient.id === patientId);
+  const selectedTemplate = templates.find((template) => template.id === templateId);
+
+  const ready = useMemo(
+    () => Boolean(
+      context.tenantId &&
+      context.userId &&
+      context.branchId &&
+      context.practitionerId
+    ),
+    [context]
+  );
+
+  useEffect(() => {
+    if (!ready) return;
+
+    Promise.all([
+      getPatients(context),
+      getEligibleTemplates(context)
+    ])
+      .then(([patientRows, templateRows]) => {
+        setPatients(patientRows);
+        setTemplates(templateRows);
+        setError("");
+      })
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, [
+    context.tenantId,
+    context.userId,
+    context.branchId,
+    context.practitionerId,
+    context.specialtyCode
+  ]);
+
+  function mergeSuggestions(items: FieldSuggestion[]) {
+    setSuggestions(items);
+    const nextDraft: Record<string, string> = {};
+    for (const item of items) {
+      if (item.status === "suggested" && item.value != null) {
+        nextDraft[item.field_id] = String(item.value);
+      }
+    }
+    setValues((current) => ({ ...nextDraft, ...current }));
+  }
+
+  async function startVisit() {
+    if (!selectedPatient || !selectedTemplate) return;
+
+    setError("");
+
+    try {
+      const document = await createDocument(
+        context,
+        selectedTemplate.id,
+        selectedPatient
+      );
+      setDocumentId(document.id);
+
+      const visit = await createVisitSession(
+        context,
+        document.id,
+        selectedPatient.id
+      );
+      setSessionId(visit.id);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Браузер не поддерживает запись с микрофона");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      recorder.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = async (event) => {
+        if (!event.data.size) return;
+
+        const chunkId =
+          "chunk-" +
+          Date.now() +
+          "-" +
+          String(chunkCounter.current++);
+
+        try {
+          const result = await uploadAudioChunk(
+            context,
+            visit.id,
+            chunkId,
+            event.data
+          );
+          setTranscript(result.transcript);
+          mergeSuggestions(result.suggestions);
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      };
+
+      mediaRecorder.start(5000);
+      setRecording(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function finishConversation() {
+    const active = recorder.current;
+
+    if (active && active.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        active.addEventListener(
+          "stop",
+          () => resolve(),
+          { once: true }
+        );
+        active.stop();
+        active.stream.getTracks().forEach((track) => track.stop());
+      });
+    }
+
+    setRecording(false);
+
+    if (!sessionId) return;
+
+    try {
+      const result = await finishVisitSession(context, sessionId);
+      setTranscript(result.transcript);
+      mergeSuggestions(result.suggestions);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function accept(fieldId: string) {
+    if (!sessionId) return;
+
+    try {
+      const result = await acceptSuggestion(context, sessionId, fieldId);
+      setValues((current) => ({
+        ...current,
+        [fieldId]: String(result.value ?? "")
+      }));
+      setSuggestions((current) =>
+        current.map((item) =>
+          item.field_id === fieldId
+            ? { ...item, status: "accepted" }
+            : item
+        )
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function saveFields() {
+    if (!documentId) return;
+
+    try {
+      await updateDocumentFields(context, documentId, values);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function runIcdSearch() {
+    try {
+      setIcdResults(await searchIcd(context, icdQuery));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function chooseIcd(item: { code: string; title: string }) {
+    setSelectedIcd(item);
+    setValues((current) => ({
+      ...current,
+      diagnosis_text: item.code + " — " + item.title
+    }));
+
+    try {
+      setProtocols(await getProtocols(context, item.code));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function finalize() {
+    if (!documentId) return;
+
+    try {
+      await saveFields();
+      const result = await finalizeDocument(context, documentId);
+      setFinalDocument(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  const fields = selectedTemplate?.fields || [];
+
+  return (
+    <div className="page">
+      <div className="page-heading">
+        <div>
+          <h1>Кабинет врача</h1>
+          <p>
+            Реальный пациент MIS → разговор → AI-черновик → проверка врача → документ.
+          </p>
+        </div>
+        {recording && <span className="recording">● Идет запись</span>}
+      </div>
+
+      {error && <div className="notice error">{error}</div>}
+
+      <section className="panel">
+        <div className="form-grid">
+          <label>
+            Пациент
+            <select
+              value={patientId}
+              onChange={(event) => setPatientId(event.target.value)}
+              disabled={Boolean(documentId)}
+            >
+              <option value="">Выберите пациента</option>
+              {patients.map((patient) => (
+                <option value={patient.id} key={patient.id}>
+                  {[patient.last_name, patient.first_name, patient.middle_name]
+                    .filter(Boolean)
+                    .join(" ")}
+                  {patient.medical_record_number
+                    ? " · " + patient.medical_record_number
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Протокол осмотра
+            <select
+              value={templateId}
+              onChange={(event) => setTemplateId(event.target.value)}
+              disabled={Boolean(documentId)}
+            >
+              <option value="">Выберите шаблон</option>
+              {templates.map((template) => (
+                <option value={template.id} key={template.id}>
+                  {template.name + " · v" + String(template.version)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {!documentId && (
+          <button
+            className="primary large"
+            disabled={!patientId || !templateId || !ready}
+            onClick={() => void startVisit()}
+          >
+            Начать прием и включить микрофон
+          </button>
+        )}
+
+        {recording && (
+          <button
+            className="danger large"
+            onClick={() => void finishConversation()}
+          >
+            Завершить разговор
+          </button>
+        )}
+      </section>
+
+      {documentId && (
+        <div className="review-grid">
+          <section className="panel">
+            <h2>Разговор</h2>
+            <div className="transcript">
+              {transcript.map((turn) => (
+                <div
+                  className={"turn " + turn.speaker}
+                  key={turn.id}
+                >
+                  <strong>
+                    {turn.speaker === "doctor" ? "Врач" : "Пациент"}
+                  </strong>
+                  <p>{turn.text}</p>
+                </div>
+              ))}
+
+              {transcript.length === 0 && (
+                <div className="empty">
+                  Ожидается распознавание речи…
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>Протокол осмотра</h2>
+
+            <div className="stack">
+              {fields.map((field) => {
+                const suggestion = suggestions.find(
+                  (item) => item.field_id === field.id
+                );
+
+                return (
+                  <div className="clinical-field" key={field.id}>
+                    <div className="field-title">
+                      <label htmlFor={"field-" + field.id}>
+                        {field.label || field.id}
+                      </label>
+
+                      {suggestion && (
+                        <span className="confidence">
+                          {String(Math.round((suggestion.confidence || 0) * 100)) + "% AI"}
+                        </span>
+                      )}
+                    </div>
+
+                    {field.type === "textarea" ? (
+                      <textarea
+                        id={"field-" + field.id}
+                        rows={4}
+                        value={values[field.id] || ""}
+                        onChange={(event) =>
+                          setValues({
+                            ...values,
+                            [field.id]: event.target.value
+                          })
+                        }
+                      />
+                    ) : (
+                      <input
+                        id={"field-" + field.id}
+                        value={values[field.id] || ""}
+                        onChange={(event) =>
+                          setValues({
+                            ...values,
+                            [field.id]: event.target.value
+                          })
+                        }
+                      />
+                    )}
+
+                    {suggestion?.status === "suggested" && (
+                      <div className="actions">
+                        <button
+                          className="primary"
+                          onClick={() => void accept(field.id)}
+                        >
+                          Принять AI-черновик
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <button onClick={() => void saveFields()}>
+                Сохранить заполнение
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {documentId && (
+        <section className="panel">
+          <h2>МКБ-10 и клинический протокол</h2>
+
+          <div className="search-row">
+            <input
+              placeholder="Код или название МКБ-10"
+              value={icdQuery}
+              onChange={(event) => setIcdQuery(event.target.value)}
+            />
+            <button onClick={() => void runIcdSearch()}>
+              Найти
+            </button>
+          </div>
+
+          <div className="icd-results">
+            {icdResults.map((item) => (
+              <button
+                className={
+                  selectedIcd?.code === item.code
+                    ? "selected-item"
+                    : ""
+                }
+                key={item.code}
+                onClick={() => void chooseIcd(item)}
+              >
+                <strong>{item.code}</strong>{" "}
+                {item.title}
+              </button>
+            ))}
+          </div>
+
+          {selectedIcd && (
+            <div className="protocol-list">
+              <h3>{"Протоколы для " + selectedIcd.code}</h3>
+
+              {protocols.map((protocol) => (
+                <details key={protocol.id}>
+                  <summary>
+                    {protocol.title + " · v" + String(protocol.version)}
+                  </summary>
+
+                  <div className="protocol-items">
+                    {(protocol.items || []).map(
+                      (item: any, index: number) => (
+                        <label key={index}>
+                          <input type="checkbox" />
+                          {" "}
+                          {item.title || item.description || item.type}
+                        </label>
+                      )
+                    )}
+                  </div>
+                </details>
+              ))}
+
+              {protocols.length === 0 && (
+                <div className="empty">
+                  Связанный опубликованный протокол не найден.
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {documentId && !recording && (
+        <section className="panel final-panel">
+          <button
+            className="primary large"
+            onClick={() => void finalize()}
+          >
+            Завершить прием и сформировать документ
+          </button>
+
+          {finalDocument && (
+            <div className="final-actions">
+              <a
+                target="_blank"
+                rel="noreferrer"
+                href={absoluteApiUrl(finalDocument.pdf_download_url)}
+              >
+                Открыть PDF
+              </a>
+
+              <a
+                href={absoluteApiUrl(finalDocument.pdf_download_url)}
+                download
+              >
+                Скачать PDF
+              </a>
+
+              <a
+                href={absoluteApiUrl(finalDocument.docx_download_url)}
+                download
+              >
+                Скачать DOCX
+              </a>
+
+              <button
+                onClick={() =>
+                  window.open(
+                    absoluteApiUrl(finalDocument.pdf_download_url),
+                    "_blank"
+                  )
+                }
+              >
+                Печать
+              </button>
+
+              {finalDocument.verification_url && (
+                <a
+                  target="_blank"
+                  rel="noreferrer"
+                  href={finalDocument.verification_url}
+                >
+                  QR-проверка
+                </a>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
