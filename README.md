@@ -4,7 +4,7 @@ Standalone MIS module for reusable medical DOCX templates.
 
 ## Implemented
 
-- Admin uploads a DOCX template once; it persists until a new version/disable action.
+- Admin uploads a DOCX template once; it persists until disabled. Changes create a new immutable version while existing patient documents retain their original template version.
 - Templates can be assigned by specialty, practitioner, branch and visit type.
 - Doctors see eligible published templates and create patient-specific drafts.
 - Declared text fields support field-scoped speech-to-text; transcript returns as a draft and is not auto-saved.
