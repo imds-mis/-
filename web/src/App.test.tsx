@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -132,4 +132,32 @@ it("doctor cabinet supports local patients without MIS upstream", async () => {
   expect(await screen.findByText(/Иванова Анна Сергеевна/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Новый пациент/i })).toBeInTheDocument();
   expect(screen.queryByText(/MIS upstream patient request failed/i)).not.toBeInTheDocument();
+});
+
+
+it("filters doctor templates by selected visit type", async () => {
+  window.history.pushState({}, "", "/doctor");
+  const urls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.includes("/v1/local/patients")) {
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/v1/doctor/templates")) {
+      return new Response(JSON.stringify({ data: [{
+        id: "t1",
+        name: "Первичный осмотр",
+        version: 1,
+        fields: []
+      }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  expect(screen.getByLabelText(/Тип приема/i)).toHaveValue("primary");
+  await waitFor(() => {
+    expect(urls.some((url) => url.includes("/v1/doctor/templates?visit_type=primary"))).toBe(true);
+  });
 });
