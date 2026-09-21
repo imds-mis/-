@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   acceptSuggestion,
   createDocument,
+  createLocalPatient,
   createVisitSession,
   FieldSuggestion,
   finalizeDocument,
   finishVisitSession,
   downloadArtifact,
   getEligibleTemplates,
-  getPatients,
+  getLocalPatients,
   getProtocols,
   LocalContext,
   Patient,
@@ -46,6 +47,16 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   const [selectedProtocolId, setSelectedProtocolId] = useState("");
   const [selectedProtocolItems, setSelectedProtocolItems] = useState<Record<string, boolean>>({});
   const [finalDocument, setFinalDocument] = useState<any>(null);
+  const [patientFormOpen, setPatientFormOpen] = useState(false);
+  const [patientForm, setPatientForm] = useState({
+    last_name: "",
+    first_name: "",
+    middle_name: "",
+    iin: "",
+    medical_record_number: "",
+    date_of_birth: "",
+    phone: ""
+  });
   const recorder = useRef<MediaRecorder | null>(null);
   const chunkCounter = useRef(0);
 
@@ -65,18 +76,13 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   useEffect(() => {
     if (!ready) return;
 
-    Promise.all([
-      getPatients(context),
-      getEligibleTemplates(context)
-    ])
-      .then(([patientRows, templateRows]) => {
-        setPatients(patientRows);
-        setTemplates(templateRows);
-        setError("");
-      })
-      .catch((reason) => {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      });
+    void getLocalPatients(context)
+      .then((patientRows) => setPatients(patientRows))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+
+    void getEligibleTemplates(context)
+      .then((templateRows) => setTemplates(templateRows))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [
     context.tenantId,
     context.userId,
@@ -84,6 +90,30 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
     context.practitionerId,
     context.specialtyCode
   ]);
+
+  async function addPatient(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    try {
+      const created = await createLocalPatient(context, patientForm);
+      setPatients((current) => [...current, created].sort((a, b) =>
+        (a.last_name + a.first_name).localeCompare(b.last_name + b.first_name, "ru")
+      ));
+      setPatientId(created.id);
+      setPatientForm({
+        last_name: "",
+        first_name: "",
+        middle_name: "",
+        iin: "",
+        medical_record_number: "",
+        date_of_birth: "",
+        phone: ""
+      });
+      setPatientFormOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
 
   function mergeSuggestions(items: FieldSuggestion[]) {
     setSuggestions(items);
@@ -284,7 +314,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
         <div>
           <h1>Кабинет врача</h1>
           <p>
-            Реальный пациент MIS → разговор → AI-черновик → проверка врача → документ.
+            Пациент → разговор → AI-черновик → проверка врача → документ.
           </p>
         </div>
         {recording && <span className="recording">● Идет запись</span>}
@@ -294,26 +324,33 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
 
       <section className="panel">
         <div className="form-grid">
-          <label>
-            Пациент
-            <select
-              value={patientId}
-              onChange={(event) => setPatientId(event.target.value)}
-              disabled={Boolean(documentId)}
-            >
-              <option value="">Выберите пациента</option>
-              {patients.map((patient) => (
-                <option value={patient.id} key={patient.id}>
-                  {[patient.last_name, patient.first_name, patient.middle_name]
-                    .filter(Boolean)
-                    .join(" ")}
-                  {patient.medical_record_number
-                    ? " · " + patient.medical_record_number
-                    : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="patient-selector-block">
+            <label>
+              Пациент
+              <select
+                value={patientId}
+                onChange={(event) => setPatientId(event.target.value)}
+                disabled={Boolean(documentId)}
+              >
+                <option value="">Выберите пациента</option>
+                {patients.map((patient) => (
+                  <option value={patient.id} key={patient.id}>
+                    {[patient.last_name, patient.first_name, patient.middle_name]
+                      .filter(Boolean)
+                      .join(" ")}
+                    {patient.medical_record_number
+                      ? " · " + patient.medical_record_number
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!documentId && (
+              <button type="button" onClick={() => setPatientFormOpen((value) => !value)}>
+                {patientFormOpen ? "Скрыть форму" : "+ Новый пациент"}
+              </button>
+            )}
+          </div>
 
           <label>
             Протокол осмотра
@@ -331,6 +368,24 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
             </select>
           </label>
         </div>
+
+        {patientFormOpen && !documentId && (
+          <form className="local-patient-form" onSubmit={addPatient}>
+            <div className="form-grid">
+              <label>Фамилия<input required value={patientForm.last_name} onChange={(event) => setPatientForm({ ...patientForm, last_name: event.target.value })} /></label>
+              <label>Имя<input required value={patientForm.first_name} onChange={(event) => setPatientForm({ ...patientForm, first_name: event.target.value })} /></label>
+              <label>Отчество<input value={patientForm.middle_name} onChange={(event) => setPatientForm({ ...patientForm, middle_name: event.target.value })} /></label>
+              <label>ИИН<input value={patientForm.iin} onChange={(event) => setPatientForm({ ...patientForm, iin: event.target.value })} /></label>
+              <label>№ медкарты<input value={patientForm.medical_record_number} onChange={(event) => setPatientForm({ ...patientForm, medical_record_number: event.target.value })} /></label>
+              <label>Дата рождения<input type="date" value={patientForm.date_of_birth} onChange={(event) => setPatientForm({ ...patientForm, date_of_birth: event.target.value })} /></label>
+              <label>Телефон<input value={patientForm.phone} onChange={(event) => setPatientForm({ ...patientForm, phone: event.target.value })} /></label>
+            </div>
+            <div className="actions">
+              <button className="primary" type="submit">Сохранить пациента</button>
+              <button type="button" onClick={() => setPatientFormOpen(false)}>Отмена</button>
+            </div>
+          </form>
+        )}
 
         {!documentId && (
           <button
