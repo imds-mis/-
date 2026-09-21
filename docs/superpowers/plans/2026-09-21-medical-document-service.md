@@ -4,9 +4,9 @@
 
 **Goal:** Build a standalone, testable MIS medical document service in `imds-mis/-` that persists reusable DOCX templates, exposes specialty-scoped doctor forms, supports ICD-10/protocol selection and field-scoped speech-to-text, and finalizes immutable downloadable documents with signed QR verification.
 
-**Architecture:** Fastify + TypeScript API with PostgreSQL as system of record and a filesystem object-store adapter. Medical templates and protocol versions are immutable once published. Rendering is isolated behind adapters so the API can run/test without LibreOffice while production can render DOCX/PDF locally.
+**Architecture:** FastAPI + SQLAlchemy API with PostgreSQL as production system of record, SQLite for local tests, and a filesystem object-store adapter. Medical templates and protocol versions are immutable once published. Rendering is isolated behind local DOCX/LibreOffice adapters.
 
-**Tech Stack:** Node.js 24, TypeScript, Fastify, PostgreSQL, Zod, @fastify/multipart, docxtemplater/pizzip, qrcode, pdf-lib, Node test runner.
+**Tech Stack:** Python 3.13, FastAPI, SQLAlchemy, PostgreSQL, python-docx, qrcode, LibreOffice, pytest.
 
 **Spec:** `docs/specs/2026-09-21-medical-document-service.md`
 
