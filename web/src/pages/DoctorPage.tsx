@@ -33,6 +33,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   const [templates, setTemplates] = useState<EligibleTemplate[]>([]);
   const [patientId, setPatientId] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [visitType, setVisitType] = useState("primary");
   const [documentId, setDocumentId] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [recording, setRecording] = useState(false);
@@ -80,15 +81,21 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
       .then((patientRows) => setPatients(patientRows))
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
 
-    void getEligibleTemplates(context)
-      .then((templateRows) => setTemplates(templateRows))
+    void getEligibleTemplates(context, visitType)
+      .then((templateRows) => {
+        setTemplates(templateRows);
+        if (templateId && !templateRows.some((item) => item.id === templateId)) {
+          setTemplateId("");
+        }
+      })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [
     context.tenantId,
     context.userId,
     context.branchId,
     context.practitionerId,
-    context.specialtyCode
+    context.specialtyCode,
+    visitType
   ]);
 
   async function addPatient(event: FormEvent<HTMLFormElement>) {
@@ -128,7 +135,8 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
       const document = await createDocument(
         context,
         selectedTemplate.id,
-        selectedPatient
+        selectedPatient,
+        visitType
       );
       setDocumentId(document.id);
 
@@ -323,7 +331,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
       {error && <div className="notice error">{error}</div>}
 
       <section className="panel">
-        <div className="form-grid">
+        <div className="form-grid doctor-top-grid">
           <div className="patient-selector-block">
             <label>
               Пациент
@@ -351,6 +359,22 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
               </button>
             )}
           </div>
+
+          <label>
+            Тип приема
+            <select
+              aria-label="Тип приема"
+              value={visitType}
+              onChange={(event) => setVisitType(event.target.value)}
+              disabled={Boolean(documentId)}
+            >
+              <option value="primary">Первичный прием</option>
+              <option value="follow_up">Повторный прием</option>
+              <option value="consultation">Консультация</option>
+              <option value="examination">Осмотр</option>
+              <option value="procedure">Процедура</option>
+            </select>
+          </label>
 
           <label>
             Протокол осмотра
