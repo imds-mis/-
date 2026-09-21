@@ -190,3 +190,58 @@ def test_doctor_profile_specialty_grants_template_access_automatically(tmp_path:
     wrong = dict(doctor)
     wrong["X-Practitioner-ID"] = "doctor-2"
     assert client.get("/v1/doctor/templates", headers=wrong).json()["data"] == []
+
+
+def test_clinic_header_settings_and_real_template_preview(tmp_path: Path):
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path/'header.db'}",
+        storage_root=tmp_path/"storage",
+        qr_secret="s",
+        public_base_url="http://testserver",
+        stt_url=None,
+    )
+    client = TestClient(app)
+    h = {
+        "X-Tenant-ID": "t1",
+        "X-User-ID": "admin",
+        "X-Branch-ID": "b1",
+        "X-Practitioner-ID": "admin-p",
+        "X-Specialty-Code": "GYNE",
+    }
+
+    saved = client.post("/v1/admin/clinic-header", headers=h, data={
+        "clinic_name": "Amanat Med",
+        "bin": "123456789012",
+        "address": "Алматы",
+        "phone": "+7 700 000 00 00",
+        "license_text": "Лицензия №123",
+        "extra_line": "Медицинский центр",
+        "footer_text": "Конфиденциальный медицинский документ",
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["data"]["clinic_name"] == "Amanat Med"
+
+    got = client.get("/v1/admin/clinic-header", headers=h)
+    assert got.status_code == 200
+    assert got.json()["data"]["phone"] == "+7 700 000 00 00"
+
+    source = tmp_path/"preview.docx"
+    d = Document()
+    d.add_paragraph("Пациент: {{patient.full_name}}")
+    d.add_paragraph("Жалобы: {{complaints}}")
+    d.save(source)
+
+    template = client.post(
+        "/v1/admin/templates",
+        headers=h,
+        files={"file": ("preview.docx", source.read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={
+            "name": "Осмотр",
+            "fields_json": json.dumps([{"id":"complaints","label":"Жалобы","type":"textarea"}]),
+            "assignments_json": json.dumps([{"specialty_code":"GYNE","branch_id":"b1"}]),
+        },
+    ).json()["data"]
+
+    preview = client.get(f"/v1/admin/templates/{template['id']}/preview.pdf", headers=h)
+    assert preview.status_code == 200, preview.text
+    assert preview.content.startswith(b"%PDF")
