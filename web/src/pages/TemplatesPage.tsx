@@ -59,17 +59,23 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
 
   async function refresh() {
     if (!contextReady) return;
+
+    let templateError = "";
     try {
-      const [templateRows, practitionerRows] = await Promise.all([
-        getTemplates(context),
-        getPractitioners(context)
-      ]);
+      const templateRows = await getTemplates(context);
       setTemplates(templateRows);
-      setPractitioners(practitionerRows);
-      setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      templateError = error instanceof Error ? error.message : String(error);
     }
+
+    try {
+      const practitionerRows = await getPractitioners(context);
+      setPractitioners(practitionerRows);
+    } catch {
+      setPractitioners([]);
+    }
+
+    setStatus(templateError);
   }
 
   useEffect(() => {
@@ -123,8 +129,13 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
       setFile(null);
       setFields(fallbackFields);
       setEnabledFields(Object.fromEntries(fallbackFields.map((field) => [field.id, true])));
-      setStatus("Шаблон загружен. Проверьте карточку и опубликуйте версию.");
-      await refresh();
+      setStatus("Шаблон сохранён. Он появится в библиотеке справа.");
+      try {
+        const templateRows = await getTemplates(context);
+        setTemplates(templateRows);
+      } catch (refreshError) {
+        setStatus("Шаблон сохранён, но библиотеку не удалось обновить автоматически: " + (refreshError instanceof Error ? refreshError.message : String(refreshError)));
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
