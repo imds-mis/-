@@ -66,20 +66,16 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
 export function defaultContext(): LocalContext {
   return {
-    tenantId: localStorage.getItem("imds.tenantId") || import.meta.env.VITE_TENANT_ID || "",
-    userId: localStorage.getItem("imds.userId") || import.meta.env.VITE_USER_ID || "",
-    branchId: localStorage.getItem("imds.branchId") || import.meta.env.VITE_BRANCH_ID || "",
-    practitionerId: localStorage.getItem("imds.practitionerId") || import.meta.env.VITE_PRACTITIONER_ID || "",
-    specialtyCode: localStorage.getItem("imds.specialtyCode") || import.meta.env.VITE_SPECIALTY_CODE || "",
+    tenantId: import.meta.env.VITE_TENANT_ID || "local-tenant",
+    userId: import.meta.env.VITE_USER_ID || "local-user",
+    branchId: import.meta.env.VITE_BRANCH_ID || "local-branch",
+    practitionerId: import.meta.env.VITE_PRACTITIONER_ID || "local-doctor-1",
+    specialtyCode: import.meta.env.VITE_SPECIALTY_CODE || "GYNE",
   };
 }
 
-export function saveContext(context: LocalContext): void {
-  localStorage.setItem("imds.tenantId", context.tenantId);
-  localStorage.setItem("imds.userId", context.userId);
-  localStorage.setItem("imds.branchId", context.branchId);
-  localStorage.setItem("imds.practitionerId", context.practitionerId);
-  localStorage.setItem("imds.specialtyCode", context.specialtyCode);
+export function saveContext(_context: LocalContext): void {
+  // Local mode intentionally has no editable technical context UI.
 }
 
 function requestHeaders(context: LocalContext, json = true): HeadersInit {
