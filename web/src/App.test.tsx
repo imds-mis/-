@@ -107,3 +107,29 @@ it("shows clinic header settings and real PDF preview actions", async () => {
   expect(await screen.findByRole("button", { name: /Шапка клиники/i })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Предпросмотр PDF/i })).toBeInTheDocument();
 });
+
+
+it("doctor cabinet supports local patients without MIS upstream", async () => {
+  window.history.pushState({}, "", "/doctor");
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/v1/local/patients")) {
+      return new Response(JSON.stringify({ data: [{
+        id: "p1",
+        first_name: "Анна",
+        last_name: "Иванова",
+        middle_name: "Сергеевна",
+        medical_record_number: "MR-001"
+      }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/v1/doctor/templates")) {
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  expect(await screen.findByText(/Иванова Анна Сергеевна/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Новый пациент/i })).toBeInTheDocument();
+  expect(screen.queryByText(/MIS upstream patient request failed/i)).not.toBeInTheDocument();
+});
