@@ -190,8 +190,9 @@ export async function getTemplates(context: LocalContext): Promise<TemplateSumma
   return (await parse<{ data: TemplateSummary[] }>(response)).data;
 }
 
-export async function getEligibleTemplates(context: LocalContext): Promise<Array<{id:string;name:string;version:number;fields:TemplateField[]}>> {
-  const response = await fetch(API_BASE + "/v1/doctor/templates", { headers: requestHeaders(context, false) });
+export async function getEligibleTemplates(context: LocalContext, visitType?: string): Promise<Array<{id:string;name:string;version:number;fields:TemplateField[]}>> {
+  const suffix = visitType ? "?visit_type=" + encodeURIComponent(visitType) : "";
+  const response = await fetch(API_BASE + "/v1/doctor/templates" + suffix, { headers: requestHeaders(context, false) });
   return (await parse<{ data: Array<{id:string;name:string;version:number;fields:TemplateField[]}> }>(response)).data;
 }
 
