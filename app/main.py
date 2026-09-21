@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalogs import parse_icd_csv
 from .context import RequestContext, get_context
 from .domain import template_is_eligible
-from .models import Base, DoctorProfile, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
+from .models import Base, ClinicHeader, DoctorProfile, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
 from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
@@ -207,6 +207,80 @@ def create_app(
         if not data:
             raise HTTPException(404, "patient not found")
         return {"data": data}
+
+    def clinic_header_payload(row: ClinicHeader | None) -> dict[str, Any]:
+        if row is None:
+            return {
+                "clinic_name": "",
+                "bin": "",
+                "address": "",
+                "phone": "",
+                "license_text": "",
+                "extra_line": "",
+                "footer_text": "",
+                "has_logo": False,
+            }
+        return {
+            "clinic_name": row.clinic_name or "",
+            "bin": row.bin or "",
+            "address": row.address or "",
+            "phone": row.phone or "",
+            "license_text": row.license_text or "",
+            "extra_line": row.extra_line or "",
+            "footer_text": row.footer_text or "",
+            "has_logo": bool(row.logo_key),
+        }
+
+    @app.get("/v1/admin/clinic-header")
+    def get_clinic_header(
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        row = session.scalar(select(ClinicHeader).where(
+            ClinicHeader.tenant_id == ctx.tenant_id,
+        ))
+        return {"data": clinic_header_payload(row)}
+
+    @app.post("/v1/admin/clinic-header")
+    async def save_clinic_header(
+        clinic_name: str = Form(""),
+        bin: str = Form(""),
+        address: str = Form(""),
+        phone: str = Form(""),
+        license_text: str = Form(""),
+        extra_line: str = Form(""),
+        footer_text: str = Form(""),
+        logo: UploadFile | None = File(default=None),
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        row = session.scalar(select(ClinicHeader).where(
+            ClinicHeader.tenant_id == ctx.tenant_id,
+        ))
+        if row is None:
+            row = ClinicHeader(
+                id=str(uuid.uuid4()),
+                tenant_id=ctx.tenant_id,
+                clinic_name=clinic_name.strip(),
+            )
+            session.add(row)
+        row.clinic_name = clinic_name.strip()
+        row.bin = bin.strip() or None
+        row.address = address.strip() or None
+        row.phone = phone.strip() or None
+        row.license_text = license_text.strip() or None
+        row.extra_line = extra_line.strip() or None
+        row.footer_text = footer_text.strip() or None
+        if logo and logo.filename:
+            content_type = (logo.content_type or "").lower()
+            if content_type not in {"image/png", "image/jpeg"}:
+                raise HTTPException(400, "clinic logo must be PNG or JPEG")
+            ext = ".png" if content_type == "image/png" else ".jpg"
+            logo_key = f"{ctx.tenant_id}/settings/clinic-header/logo{ext}"
+            storage.write(logo_key, await logo.read(), overwrite=True)
+            row.logo_key = logo_key
+        session.commit()
+        return {"data": clinic_header_payload(row)}
 
     @app.post("/v1/admin/doctor-profiles", status_code=201)
     def create_doctor_profile(
@@ -411,6 +485,56 @@ def create_app(
         template.active = False
         session.commit()
         return {"data": {"id": template.id, "active": False}}
+
+    @app.get("/v1/admin/templates/{template_id}/preview.pdf")
+    def preview_template_pdf(
+        template_id: str,
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        template = session.scalar(select(Template).where(
+            Template.id == template_id,
+            Template.tenant_id == ctx.tenant_id,
+        ))
+        if not template:
+            raise HTTPException(404, "template not found")
+        version = session.scalars(select(TemplateVersion).where(
+            TemplateVersion.template_id == template_id,
+            TemplateVersion.tenant_id == ctx.tenant_id,
+        ).order_by(TemplateVersion.version.desc())).first()
+        if not version:
+            raise HTTPException(409, "template has no version")
+        header = session.scalar(select(ClinicHeader).where(
+            ClinicHeader.tenant_id == ctx.tenant_id,
+        ))
+        header_data = clinic_header_payload(header)
+        logo_path = storage.path(header.logo_key) if header and header.logo_key else None
+        values: dict[str, Any] = {
+            "patient.full_name": "Иванов Иван Иванович",
+            "patient.medical_record_number": "000001",
+            "patient.date_of_birth": "01.01.1990",
+        }
+        for field in version.fields or []:
+            field_id = field.get("id")
+            if field_id:
+                values[field_id] = f"[{field.get('label') or field_id}]"
+        with tempfile.TemporaryDirectory() as td:
+            docx_path = Path(td) / "preview.docx"
+            pdf_path = Path(td) / "preview.pdf"
+            render_docx(
+                storage.path(version.source_key),
+                docx_path,
+                values,
+                clinic_header=header_data,
+                logo_path=logo_path,
+            )
+            convert_docx_to_pdf(docx_path, pdf_path)
+            payload = pdf_path.read_bytes()
+        return Response(
+            content=payload,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{template.id}-preview.pdf"'},
+        )
 
     @app.post("/v1/admin/templates/{template_id}/publish")
     def publish_template(template_id: str, ctx: RequestContext = Depends(get_context), session: Session = Depends(db)):
@@ -633,7 +757,19 @@ def create_app(
         with tempfile.TemporaryDirectory() as td:
             rendered_docx = Path(td) / "final.docx"
             rendered_pdf = Path(td) / "final.pdf"
-            render_docx(storage.path(version.source_key), rendered_docx, values, verification_url)
+            clinic_header = session.scalar(select(ClinicHeader).where(
+                ClinicHeader.tenant_id == ctx.tenant_id,
+            ))
+            header_data = clinic_header_payload(clinic_header)
+            logo_path = storage.path(clinic_header.logo_key) if clinic_header and clinic_header.logo_key else None
+            render_docx(
+                storage.path(version.source_key),
+                rendered_docx,
+                values,
+                verification_url,
+                clinic_header=header_data,
+                logo_path=logo_path,
+            )
             convert_docx_to_pdf(rendered_docx, rendered_pdf)
             docx_bytes = rendered_docx.read_bytes()
             pdf_bytes = rendered_pdf.read_bytes()
