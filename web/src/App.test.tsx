@@ -73,3 +73,37 @@ it("shows saved templates even when practitioner loading fails", async () => {
   render(<App />);
   expect(await screen.findByText("Осмотр")).toBeInTheDocument();
 });
+
+
+it("shows clinic header settings and real PDF preview actions", async () => {
+  window.history.pushState({}, "", "/settings/templates");
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/v1/admin/clinic-header")) {
+      return new Response(JSON.stringify({ data: {
+        clinic_name: "",
+        bin: "",
+        address: "",
+        phone: "",
+        license_text: "",
+        extra_line: "",
+        footer_text: "",
+        has_logo: false
+      }}), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/v1/admin/templates")) {
+      return new Response(JSON.stringify({ data: [{
+        id: "template-1",
+        name: "Осмотр",
+        active: true,
+        versions: [{ id:"v1", version:1, status:"published", fields:[] }],
+        assignments:[]
+      }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  expect(await screen.findByRole("button", { name: /Шапка клиники/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Предпросмотр PDF/i })).toBeInTheDocument();
+});
