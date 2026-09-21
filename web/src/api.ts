@@ -53,6 +53,17 @@ export type TranscriptTurn = {
   confidence?: number | null;
 };
 
+export type ClinicHeaderSettings = {
+  clinic_name: string;
+  bin: string;
+  address: string;
+  phone: string;
+  license_text: string;
+  extra_line: string;
+  footer_text: string;
+  has_logo: boolean;
+};
+
 export type FieldSuggestion = {
   id: string;
   field_id: string;
@@ -106,6 +117,45 @@ export async function getPractitioners(context: LocalContext): Promise<Practitio
 export async function getPatients(context: LocalContext): Promise<Patient[]> {
   const response = await fetch(API_BASE + "/v1/integrations/mis/patients", { headers: requestHeaders(context, false) });
   return (await parse<{ data: Patient[] }>(response)).data;
+}
+
+export async function getClinicHeader(context: LocalContext): Promise<ClinicHeaderSettings> {
+  const response = await fetch(API_BASE + "/v1/admin/clinic-header", {
+    headers: requestHeaders(context, false)
+  });
+  return (await parse<{ data: ClinicHeaderSettings }>(response)).data;
+}
+
+export async function saveClinicHeader(
+  context: LocalContext,
+  input: Omit<ClinicHeaderSettings, "has_logo"> & { logo?: File | null }
+): Promise<ClinicHeaderSettings> {
+  const form = new FormData();
+  form.set("clinic_name", input.clinic_name);
+  form.set("bin", input.bin);
+  form.set("address", input.address);
+  form.set("phone", input.phone);
+  form.set("license_text", input.license_text);
+  form.set("extra_line", input.extra_line);
+  form.set("footer_text", input.footer_text);
+  if (input.logo) form.set("logo", input.logo);
+  const response = await fetch(API_BASE + "/v1/admin/clinic-header", {
+    method: "POST",
+    headers: requestHeaders(context, false),
+    body: form
+  });
+  return (await parse<{ data: ClinicHeaderSettings }>(response)).data;
+}
+
+export async function previewTemplatePdf(context: LocalContext, templateId: string): Promise<Blob> {
+  const response = await fetch(API_BASE + "/v1/admin/templates/" + templateId + "/preview.pdf", {
+    headers: requestHeaders(context, false)
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || body.error || ("HTTP " + response.status));
+  }
+  return response.blob();
 }
 
 export async function getTemplates(context: LocalContext): Promise<TemplateSummary[]> {
