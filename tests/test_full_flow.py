@@ -94,3 +94,35 @@ def test_full_medical_document_flow(tmp_path: Path):
     other = dict(headers)
     other["X-Tenant-ID"] = "t2"
     assert client.patch(f"/v1/doctor/documents/{document['id']}/fields", headers=other, json={"values": {"complaints": "x"}}).status_code == 404
+
+
+def test_published_template_change_creates_new_version_and_old_document_keeps_snapshot(tmp_path: Path):
+    app = create_app(database_url=f"sqlite:///{tmp_path/'db.sqlite'}", storage_root=tmp_path/"storage", qr_secret="s", public_base_url="http://testserver", stt_url=None)
+    client = TestClient(app)
+    h = {"X-Tenant-ID":"t1","X-User-ID":"u1","X-Branch-ID":"b1","X-Practitioner-ID":"p1","X-Specialty-Code":"GYNE"}
+    source = tmp_path/"v1.docx"
+    d = Document()
+    d.add_paragraph("V1 {{complaints}}")
+    d.save(source)
+    t = client.post("/v1/admin/templates", headers=h,
+        files={"file":("v1.docx",source.read_bytes(),"application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={"name":"T","fields_json":json.dumps([{"id":"complaints","type":"textarea"}]),"assignments_json":json.dumps([{"specialty_code":"GYNE"}])}
+    ).json()["data"]["id"]
+    client.post(f"/v1/admin/templates/{t}/publish", headers=h)
+    first = client.post("/v1/doctor/documents", headers=h, json={"template_id":t,"patient_id":"p1"}).json()["data"]
+    assert first["template_version"] == 1
+
+    source2 = tmp_path/"v2.docx"
+    d = Document()
+    d.add_paragraph("V2 {{complaints}}")
+    d.save(source2)
+    created_v2 = client.post(f"/v1/admin/templates/{t}/versions", headers=h,
+        files={"file":("v2.docx",source2.read_bytes(),"application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={"fields_json":json.dumps([{"id":"complaints","type":"textarea"}])}
+    )
+    assert created_v2.status_code == 201, created_v2.text
+    assert created_v2.json()["data"]["version"] == 2
+    client.post(f"/v1/admin/templates/{t}/publish", headers=h)
+    second = client.post("/v1/doctor/documents", headers=h, json={"template_id":t,"patient_id":"p2"}).json()["data"]
+    assert second["template_version"] == 2
+    assert first["template_version"] == 1
