@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `imds-mis/-` runnable locally with one Docker Compose command, exposing Settings/Templates and Doctor Cabinet with demo AI visit capture.
+**Goal:** Make `imds-mis/-` runnable locally with one Docker Compose command, exposing Settings/Templates and Doctor Cabinet with real AI visit capture.
 
-**Architecture:** Keep FastAPI as the backend and add visit-session APIs plus a deterministic demo AI adapter. Add a React/Vite frontend with two routes, served by its own container, and a PostgreSQL service. The frontend talks to the API through `VITE_API_BASE_URL`; local context headers emulate authenticated MIS context only in demo mode.
+**Architecture:** Keep FastAPI as the backend and add visit-session APIs plus a deterministic real AI adapter. Add a React/Vite frontend with two routes, served by its own container, and a PostgreSQL service. The frontend talks to the API through `VITE_API_BASE_URL`; local context headers emulate authenticated MIS context only in Real mode.
 
 **Tech Stack:** Python 3.13, FastAPI, SQLAlchemy, PostgreSQL, React, Vite, TypeScript, Vitest, Docker Compose, LibreOffice.
 
@@ -13,12 +13,12 @@
 ## Global Constraints
 
 - No Cloudflare or Supabase.
-- `docker compose up --build` must start the whole local demo.
+- `docker compose up --build` must start the whole local real-data run.
 - Settings/Templates and Doctor Cabinet are the two primary workspaces.
 - AI results remain suggestions until the doctor accepts/edits them.
 - Raw audio is not persisted by default.
 - Published template versions and finalized documents remain immutable.
-- Demo AI mode is visually labeled.
+- real AI mode is visually labeled.
 - Cross-tenant and cross-branch access remains fail-closed.
 
 ## Review Focus
@@ -53,7 +53,7 @@
 - [ ] Run targeted tests and full backend suite.
 - [ ] Commit `feat: add AI visit sessions`.
 
-### Task 2: Demo AI adapter and suggestion extraction
+### Task 2: real AI adapter and suggestion extraction
 
 **Files:**
 - Create: `app/ai_visit.py`
@@ -62,14 +62,14 @@
 
 **Interfaces:**
 - Produces `process_audio_chunk(audio, template_fields, mode) -> VisitAiResult`
-- Produces deterministic demo transcript with `doctor` / `patient` roles.
+- Produces deterministic real transcript with `doctor` / `patient` roles.
 
-- [ ] Write failing tests proving demo mode creates speaker turns and only suggests declared template fields.
+- [ ] Write failing tests proving Real mode creates speaker turns and only suggests declared template fields.
 - [ ] Verify RED.
-- [ ] Implement deterministic demo adapter and provider interface.
+- [ ] Implement real provider adapter and provider interface.
 - [ ] Ensure missing facts stay absent and every suggestion carries evidence/confidence.
 - [ ] Verify targeted and full backend suite.
-- [ ] Commit `feat: add demo AI visit extraction`.
+- [ ] Commit `feat: add real AI visit extraction`.
 
 ### Task 3: Frontend foundation and routing
 
@@ -86,12 +86,12 @@
 
 **Interfaces:**
 - Produces routes `/settings/templates` and `/doctor`.
-- Produces API client that always injects local demo context headers.
+- Produces API client that always injects local real-data run context headers.
 
 - [ ] Write failing route smoke tests.
 - [ ] Verify RED with `npm test`.
 - [ ] Add React/Vite app shell and navigation.
-- [ ] Add local API client and visible `DEMO AI` badge.
+- [ ] Add local API client and visible `real AI` badge.
 - [ ] Verify tests and `npm run build`.
 - [ ] Commit `feat: add local MIS document UI shell`.
 
@@ -126,7 +126,7 @@
 - Test: `web/src/pages/DoctorPage.test.tsx`
 
 **Interfaces:**
-- Selects patient/demo context and eligible template.
+- Selects real patient context and eligible template.
 - Starts a medical document and visit session.
 - Uses MediaRecorder when available.
 - Sends audio chunks with an idempotency key.
@@ -181,7 +181,7 @@
 - [ ] Add CI frontend install/test/build plus backend suite.
 - [ ] Document exact local commands and demo flow.
 - [ ] Run CI on the branch and confirm success.
-- [ ] Commit `chore: add one-command local demo stack`.
+- [ ] Commit `chore: add one-command local real-data run stack`.
 
 ### Task 8: End-to-end verification
 
@@ -190,10 +190,23 @@
 
 - [ ] Verify clean local sequence: clone → checkout branch → `docker compose up --build`.
 - [ ] Verify Settings/Templates upload/publish flow.
-- [ ] Verify Doctor Cabinet start visit → demo transcript → suggestions → accept/edit.
+- [ ] Verify Doctor Cabinet start visit → real transcript → suggestions → accept/edit.
 - [ ] Verify ICD/protocol selection.
 - [ ] Verify PDF/DOCX download and print.
 - [ ] Verify QR opens the same immutable PDF.
 - [ ] Verify page reload preserves template and finalized document state.
 - [ ] Record exact verification steps in `docs/local-demo-checklist.md`.
 - [ ] Commit `test: document local end-to-end demo verification`.
+
+
+## Real-data integration amendment
+
+- Do not create seeded patients, fake practitioners, deterministic transcripts, or fake clinical suggestions.
+- Add a MIS upstream adapter that calls:
+  - `GET /api/products/mis/v1/patients?branch_id=<uuid>`
+  - `GET /api/products/mis/v1/practitioners?branch_id=<uuid>`
+  - `GET /api/products/mis/v1/patients/:patientId`
+- Forward `Authorization: Bearer ...` from configured backend credentials or incoming authorized session.
+- The speech pipeline must return real `doctor` / `patient` speaker turns.
+- The extraction pipeline must return structured field suggestions from a configured real LLM endpoint.
+- Misconfigured providers must return explicit 503/configuration errors; no fake fallback.
