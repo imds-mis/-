@@ -20,6 +20,7 @@ import {
   updateDocumentFields,
   uploadAudioChunk
 } from "../api";
+import { isDocumentEditable } from "../doctorState";
 
 type EligibleTemplate = {
   id: string;
@@ -235,7 +236,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   }
 
   async function saveFields() {
-    if (!documentId) return;
+    if (!documentId || !isDocumentEditable(finalDocument)) return;
 
     try {
       await updateDocumentFields(context, documentId, values);
@@ -303,7 +304,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   }
 
   async function finalize() {
-    if (!documentId) return;
+    if (!documentId || !isDocumentEditable(finalDocument)) return;
 
     try {
       await saveFields();
@@ -315,6 +316,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   }
 
   const fields = selectedTemplate?.fields || [];
+  const editable = isDocumentEditable(finalDocument);
 
   return (
     <div className="page">
@@ -484,6 +486,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                         id={"field-" + field.id}
                         rows={4}
                         value={values[field.id] || ""}
+                        disabled={!editable}
                         onChange={(event) =>
                           setValues({
                             ...values,
@@ -495,6 +498,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                       <input
                         id={"field-" + field.id}
                         value={values[field.id] || ""}
+                        disabled={!editable}
                         onChange={(event) =>
                           setValues({
                             ...values,
@@ -521,9 +525,15 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                 );
               })}
 
-              <button onClick={() => void saveFields()}>
-                Сохранить заполнение
-              </button>
+              {editable ? (
+                <button onClick={() => void saveFields()}>
+                  Сохранить заполнение
+                </button>
+              ) : (
+                <div className="notice success">
+                  Документ завершён. Для изменений создайте новый приём/коррекцию.
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -537,9 +547,10 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
             <input
               placeholder="Код или название МКБ-10"
               value={icdQuery}
+              disabled={!editable}
               onChange={(event) => setIcdQuery(event.target.value)}
             />
-            <button onClick={() => void runIcdSearch()}>
+            <button disabled={!editable} onClick={() => void runIcdSearch()}>
               Найти
             </button>
           </div>
@@ -612,22 +623,30 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                   Связанный опубликованный протокол не найден.
                 </div>
               )}
-            </div>
+              </div>
+            </>
           )}
         </section>
       )}
 
       {documentId && !recording && (
         <section className="panel final-panel">
-          <button
-            className="primary large"
-            onClick={() => void finalize()}
-          >
-            Завершить прием и сформировать документ
-          </button>
+          {editable && (
+            <button
+              className="primary large"
+              onClick={() => void finalize()}
+            >
+              Завершить прием и сформировать документ
+            </button>
+          )}
 
           {finalDocument && (
-            <div className="final-actions">
+            <>
+              <div className="finalized-banner">
+                <strong>Приём завершён</strong>
+                <span>Документ зафиксирован и больше не редактируется.</span>
+              </div>
+              <div className="final-actions">
               <button onClick={() => void printPdf(context, finalDocument.pdf_download_url)}>
                 Открыть / печать PDF
               </button>
