@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   acceptSuggestion,
   createDocument,
@@ -91,7 +91,7 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
     context.specialtyCode
   ]);
 
-  async function addPatient(event: React.FormEvent<HTMLFormElement>) {
+  async function addPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     try {
