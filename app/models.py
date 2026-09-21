@@ -138,3 +138,15 @@ class AiFieldSuggestion(Base):
     confidence: Mapped[float | None] = mapped_column(nullable=True)
     evidence_turn_ids: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default="suggested")
+
+
+class DoctorProfile(Base):
+    __tablename__ = "doctor_profiles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True)
+    branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    practitioner_id: Mapped[str] = mapped_column(String(100), index=True)
+    display_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    specialty_codes: Mapped[list] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
