@@ -43,6 +43,8 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
   const [icdResults, setIcdResults] = useState<Array<{ code: string; title: string }>>([]);
   const [selectedIcd, setSelectedIcd] = useState<{ code: string; title: string } | null>(null);
   const [protocols, setProtocols] = useState<any[]>([]);
+  const [selectedProtocolId, setSelectedProtocolId] = useState("");
+  const [selectedProtocolItems, setSelectedProtocolItems] = useState<Record<string, boolean>>({});
   const [finalDocument, setFinalDocument] = useState<any>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunkCounter = useRef(0);
@@ -220,10 +222,46 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
     }));
 
     try {
-      setProtocols(await getProtocols(context, item.code));
+      const rows = await getProtocols(context, item.code);
+      setProtocols(rows);
+      setSelectedProtocolId("");
+      setSelectedProtocolItems({});
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
+  }
+
+  function applyProtocolSelection() {
+    const protocol = protocols.find((item) => item.id === selectedProtocolId);
+    if (!protocol) return;
+
+    const selected = (protocol.items || [])
+      .filter((item: any, index: number) => selectedProtocolItems[String(index)])
+      .map((item: any) => item.title || item.description || item.type)
+      .filter(Boolean);
+
+    const targetField = fields.some((field) => field.id === "treatment_plan")
+      ? "treatment_plan"
+      : fields.some((field) => field.id === "recommendations")
+        ? "recommendations"
+        : "";
+
+    if (!targetField) {
+      setError("В шаблоне нет поля treatment_plan или recommendations для выбранного протокола");
+      return;
+    }
+
+    const block = [
+      "Клинический протокол: " + protocol.title + " · v" + String(protocol.version),
+      ...selected.map((title: string) => "• " + title)
+    ].join("\n");
+
+    setValues((current) => ({
+      ...current,
+      [targetField]: current[targetField]
+        ? current[targetField] + "\n\n" + block
+        : block
+    }));
   }
 
   async function finalize() {
@@ -449,7 +487,16 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
               <h3>{"Протоколы для " + selectedIcd.code}</h3>
 
               {protocols.map((protocol) => (
-                <details key={protocol.id}>
+                <details
+                  key={protocol.id}
+                  open={selectedProtocolId === protocol.id}
+                  onToggle={(event) => {
+                    if ((event.currentTarget as HTMLDetailsElement).open) {
+                      setSelectedProtocolId(protocol.id);
+                      setSelectedProtocolItems({});
+                    }
+                  }}
+                >
                   <summary>
                     {protocol.title + " · v" + String(protocol.version)}
                   </summary>
@@ -458,12 +505,25 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                     {(protocol.items || []).map(
                       (item: any, index: number) => (
                         <label key={index}>
-                          <input type="checkbox" />
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedProtocolItems[String(index)])}
+                            onChange={(event) => setSelectedProtocolItems({
+                              ...selectedProtocolItems,
+                              [String(index)]: event.target.checked
+                            })}
+                          />
                           {" "}
                           {item.title || item.description || item.type}
                         </label>
                       )
                     )}
+                    <button
+                      className="primary"
+                      onClick={() => applyProtocolSelection()}
+                    >
+                      Добавить выбранное в план
+                    </button>
                   </div>
                 </details>
               ))}
