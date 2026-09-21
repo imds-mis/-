@@ -150,3 +150,18 @@ class DoctorProfile(Base):
     specialty_codes: Mapped[list] = mapped_column(JSON, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ClinicHeader(Base):
+    __tablename__ = "clinic_headers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    clinic_name: Mapped[str] = mapped_column(String(500), default="")
+    bin: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    license_text: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    extra_line: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    footer_text: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    logo_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
