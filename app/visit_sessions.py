@@ -90,9 +90,6 @@ def register_visit_session_routes(
         return stored
 
     def append_turns(session: Session, visit: AiVisitSession, turns: list[SpeakerTurn]) -> None:
-        current_count = session.scalar(select(AiTranscriptTurn).where(
-            AiTranscriptTurn.session_id == visit.id
-        ).count()) if False else None
         existing = session.scalars(select(AiTranscriptTurn).where(
             AiTranscriptTurn.session_id == visit.id
         ).order_by(AiTranscriptTurn.sequence_no)).all()
