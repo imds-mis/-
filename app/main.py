@@ -17,7 +17,7 @@ from .catalogs import parse_icd_csv
 from .context import RequestContext, get_context
 from .domain import template_is_eligible
 from .models import Base, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
-from .qr_tokens import create_signed_token, verify_signed_token
+from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
 from .storage import LocalStorage
@@ -88,6 +88,17 @@ def create_app(
             raise HTTPException(404, "document not found")
         return doc
 
+    def make_document_token(doc: MedicalDocument) -> str:
+        return create_signed_token(
+            app.state.qr_secret,
+            {
+                "document_public_id": doc.public_id,
+                "document_version_id": doc.id,
+                "iat": int(doc.created_at.timestamp()) if doc.created_at else 0,
+                "nonce": doc.id,
+            },
+        )
+
     def response_payload(doc: MedicalDocument, token: str | None = None) -> dict[str, Any]:
         return {
             "id": doc.id,
@@ -137,6 +148,59 @@ def create_app(
             ))
         session.commit()
         return {"data": {"id": template.id, "name": template.name, "version": 1, "status": "draft"}}
+
+    @app.post("/v1/admin/templates/{template_id}/versions", status_code=201)
+    async def create_template_version(
+        template_id: str,
+        fields_json: str = Form("[]"),
+        file: UploadFile = File(...),
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        template = session.scalar(select(Template).where(
+            Template.id == template_id,
+            Template.tenant_id == ctx.tenant_id,
+        ))
+        if not template:
+            raise HTTPException(404, "template not found")
+        if not file.filename or not file.filename.lower().endswith(".docx"):
+            raise HTTPException(400, "DOCX required")
+        try:
+            fields = json.loads(fields_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(400, "invalid JSON metadata") from exc
+        latest = session.scalars(select(TemplateVersion).where(
+            TemplateVersion.template_id == template_id,
+            TemplateVersion.tenant_id == ctx.tenant_id,
+        ).order_by(TemplateVersion.version.desc())).first()
+        next_version = (latest.version if latest else 0) + 1
+        version_id = str(uuid.uuid4())
+        source_key = f"{ctx.tenant_id}/templates/{template_id}/v{next_version}/source.docx"
+        storage.write(source_key, await file.read())
+        version = TemplateVersion(
+            id=version_id,
+            tenant_id=ctx.tenant_id,
+            template_id=template_id,
+            version=next_version,
+            status="draft",
+            source_key=source_key,
+            fields=fields,
+        )
+        session.add(version)
+        session.commit()
+        return {"data": {"id": version.id, "template_id": template_id, "version": next_version, "status": "draft"}}
+
+    @app.post("/v1/admin/templates/{template_id}/disable")
+    def disable_template(template_id: str, ctx: RequestContext = Depends(get_context), session: Session = Depends(db)):
+        template = session.scalar(select(Template).where(
+            Template.id == template_id,
+            Template.tenant_id == ctx.tenant_id,
+        ))
+        if not template:
+            raise HTTPException(404, "template not found")
+        template.active = False
+        session.commit()
+        return {"data": {"id": template.id, "active": False}}
 
     @app.post("/v1/admin/templates/{template_id}/publish")
     def publish_template(template_id: str, ctx: RequestContext = Depends(get_context), session: Session = Depends(db)):
@@ -312,7 +376,7 @@ def create_app(
     @app.post("/v1/doctor/documents/{document_id}/finalize")
     def finalize(document_id: str, ctx: RequestContext = Depends(get_context), session: Session = Depends(db)):
         doc = require_document(session, ctx, document_id)
-        token = create_signed_token(app.state.qr_secret, {"document_public_id": doc.public_id, "document_version_id": doc.id})
+        token = make_document_token(doc)
         if doc.status == "finalized":
             return {"data": response_payload(doc, token)}
         version = session.get(TemplateVersion, doc.template_version_id)
@@ -366,6 +430,8 @@ def create_app(
             MedicalDocument.id == payload.get("document_version_id"),
         ))
         if not doc or doc.status != "finalized" or doc.qr_revoked or not doc.final_pdf_key:
+            raise HTTPException(404, "document not available")
+        if not doc.qr_token_hash or token_hash(token) != doc.qr_token_hash:
             raise HTTPException(404, "document not available")
         pdf_path = storage.path(doc.final_pdf_key)
         if hashlib.sha256(pdf_path.read_bytes()).hexdigest() != doc.sha256:
