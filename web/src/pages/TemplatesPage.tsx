@@ -1,13 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ClinicHeaderSettings,
   createTemplateVersion,
   disableTemplate,
+  getClinicHeader,
   getPractitioners,
   getTemplates,
   inspectTemplate,
   LocalContext,
   Practitioner,
+  previewTemplatePdf,
   publishTemplate,
+  saveClinicHeader,
   TemplateField,
   TemplateSummary,
   uploadTemplate
@@ -28,6 +32,17 @@ const visitTypes = [
   ["procedure", "Процедура"]
 ] as const;
 
+const emptyHeader: ClinicHeaderSettings = {
+  clinic_name: "",
+  bin: "",
+  address: "",
+  phone: "",
+  license_text: "",
+  extra_line: "",
+  footer_text: "",
+  has_logo: false
+};
+
 function practitionerName(item: Practitioner) {
   return [item.last_name, item.first_name, item.middle_name].filter(Boolean).join(" ");
 }
@@ -46,7 +61,14 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
   );
   const [status, setStatus] = useState("");
   const [versionFiles, setVersionFiles] = useState<Record<string, File | null>>({});
-  const [previewTemplateId, setPreviewTemplateId] = useState("");
+
+  const [clinicHeader, setClinicHeader] = useState<ClinicHeaderSettings>(emptyHeader);
+  const [clinicHeaderOpen, setClinicHeaderOpen] = useState(false);
+  const [clinicLogo, setClinicLogo] = useState<File | null>(null);
+  const [clinicHeaderStatus, setClinicHeaderStatus] = useState("");
+
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewTitle, setPreviewTitle] = useState("");
 
   const contextReady = useMemo(
     () => Boolean(context.tenantId && context.userId && context.branchId),
@@ -56,6 +78,12 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
   useEffect(() => {
     if (context.specialtyCode && !specialtyCode) setSpecialtyCode(context.specialtyCode);
   }, [context.specialtyCode]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   async function refresh() {
     if (!contextReady) return;
@@ -73,6 +101,12 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
       setPractitioners(practitionerRows);
     } catch {
       setPractitioners([]);
+    }
+
+    try {
+      setClinicHeader(await getClinicHeader(context));
+    } catch {
+      setClinicHeader(emptyHeader);
     }
 
     setStatus(templateError);
@@ -129,13 +163,48 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
       setFile(null);
       setFields(fallbackFields);
       setEnabledFields(Object.fromEntries(fallbackFields.map((field) => [field.id, true])));
-      setStatus("Шаблон сохранён. Он появится в библиотеке справа.");
+      setStatus("Шаблон сохранён. Он появился в библиотеке справа.");
       try {
-        const templateRows = await getTemplates(context);
-        setTemplates(templateRows);
+        setTemplates(await getTemplates(context));
       } catch (refreshError) {
         setStatus("Шаблон сохранён, но библиотеку не удалось обновить автоматически: " + (refreshError instanceof Error ? refreshError.message : String(refreshError)));
       }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function saveHeader(event: FormEvent) {
+    event.preventDefault();
+    setClinicHeaderStatus("Сохраняю шапку…");
+    try {
+      const saved = await saveClinicHeader(context, {
+        clinic_name: clinicHeader.clinic_name,
+        bin: clinicHeader.bin,
+        address: clinicHeader.address,
+        phone: clinicHeader.phone,
+        license_text: clinicHeader.license_text,
+        extra_line: clinicHeader.extra_line,
+        footer_text: clinicHeader.footer_text,
+        logo: clinicLogo
+      });
+      setClinicHeader(saved);
+      setClinicLogo(null);
+      setClinicHeaderStatus("Шапка клиники сохранена и будет применяться ко всем документам.");
+    } catch (error) {
+      setClinicHeaderStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openPreview(template: TemplateSummary) {
+    setStatus("Формирую PDF-предпросмотр…");
+    try {
+      const blob = await previewTemplatePdf(context, template.id);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewTitle(template.name);
+      setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -149,12 +218,112 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
           <h1>Медицинские шаблоны</h1>
           <p>Загрузите DOCX один раз. Система определит клинические поля, а последующие изменения будут новой версией.</p>
         </div>
+
+        <button
+          className="header-settings-button"
+          onClick={() => setClinicHeaderOpen((value) => !value)}
+        >
+          Шапка клиники
+        </button>
       </div>
 
-      {!contextReady && (
-        <div className="notice">
-          Для локального запуска сначала откройте <strong>Подключение</strong> в верхней панели и укажите MIS-контекст.
-        </div>
+      {clinicHeaderOpen && (
+        <section className="panel clinic-header-panel">
+          <div className="panel-title-row">
+            <div>
+              <h2>Шапка клиники</h2>
+              <div className="muted">Один раз настраивается для всех медицинских документов.</div>
+            </div>
+            <span className={clinicHeader.clinic_name ? "badge ok" : "badge"}>
+              {clinicHeader.clinic_name ? "Настроена" : "Не настроена"}
+            </span>
+          </div>
+
+          <form className="stack" onSubmit={saveHeader}>
+            <div className="form-grid">
+              <label>
+                Название клиники
+                <input
+                  value={clinicHeader.clinic_name}
+                  placeholder="Amanat Med"
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, clinic_name: event.target.value })}
+                />
+              </label>
+              <label>
+                БИН
+                <input
+                  value={clinicHeader.bin}
+                  placeholder="123456789012"
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, bin: event.target.value })}
+                />
+              </label>
+              <label>
+                Адрес
+                <input
+                  value={clinicHeader.address}
+                  placeholder="г. Алматы, ..."
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, address: event.target.value })}
+                />
+              </label>
+              <label>
+                Телефон
+                <input
+                  value={clinicHeader.phone}
+                  placeholder="+7 ..."
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, phone: event.target.value })}
+                />
+              </label>
+              <label>
+                Лицензия
+                <input
+                  value={clinicHeader.license_text}
+                  placeholder="Лицензия №..."
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, license_text: event.target.value })}
+                />
+              </label>
+              <label>
+                Дополнительная строка
+                <input
+                  value={clinicHeader.extra_line}
+                  placeholder="Медицинский центр"
+                  onChange={(event) => setClinicHeader({ ...clinicHeader, extra_line: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <label>
+              Подвал документа
+              <input
+                value={clinicHeader.footer_text}
+                placeholder="Адрес / сайт / служебная строка"
+                onChange={(event) => setClinicHeader({ ...clinicHeader, footer_text: event.target.value })}
+              />
+            </label>
+
+            <label className="file-drop compact-logo-upload">
+              <span>Логотип клиники</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                onChange={(event) => setClinicLogo(event.target.files?.[0] || null)}
+              />
+              <small>
+                {clinicLogo
+                  ? clinicLogo.name
+                  : clinicHeader.has_logo
+                    ? "Логотип уже загружен. Выберите файл, чтобы заменить."
+                    : "PNG или JPEG"}
+              </small>
+            </label>
+
+            <div className="actions">
+              <button className="primary" type="submit">Сохранить шапку</button>
+              <button type="button" onClick={() => setClinicHeaderOpen(false)}>Закрыть</button>
+            </div>
+          </form>
+
+          {clinicHeaderStatus && <div className="notice">{clinicHeaderStatus}</div>}
+        </section>
       )}
 
       <div className="two-column templates-layout">
@@ -279,7 +448,6 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
           <div className="cards">
             {templates.map((template) => {
               const latest = template.versions[0];
-              const previewOpen = previewTemplateId === template.id;
               return (
                 <article className="card template-card" key={template.id}>
                   <div className="card-row">
@@ -305,20 +473,20 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
                     ))}
                   </div>
 
-                  {previewOpen && latest && (
-                    <div className="template-preview">
-                      <strong>Поля v{latest.version}</strong>
-                      <div className="preview-fields">
-                        {(latest.fields || []).map((field) => (
-                          <span key={field.id}>✓ {field.label || field.id}</span>
-                        ))}
-                      </div>
+                  {latest && (
+                    <div className="template-preview-summary">
+                      {(latest.fields || []).slice(0, 5).map((field) => (
+                        <span key={field.id}>✓ {field.label || field.id}</span>
+                      ))}
+                      {(latest.fields || []).length > 5 && (
+                        <span>+ ещё {(latest.fields || []).length - 5}</span>
+                      )}
                     </div>
                   )}
 
                   <div className="actions">
-                    <button onClick={() => setPreviewTemplateId(previewOpen ? "" : template.id)}>
-                      {previewOpen ? "Скрыть поля" : "Предпросмотр"}
+                    <button className="preview-primary" onClick={() => void openPreview(template)}>
+                      Предпросмотр PDF
                     </button>
 
                     {template.active && latest && (
@@ -386,6 +554,26 @@ export default function TemplatesPage({ context }: { context: LocalContext }) {
           </div>
         </section>
       </div>
+
+      {previewUrl && (
+        <div className="preview-backdrop" onClick={() => setPreviewUrl("")}>
+          <section className="preview-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-title-row">
+              <div>
+                <h2>Предпросмотр документа</h2>
+                <div className="muted">{previewTitle}</div>
+              </div>
+              <div className="actions">
+                <a href={previewUrl} target="_blank" rel="noreferrer">Открыть отдельно</a>
+                <button onClick={() => setPreviewUrl("")}>Закрыть</button>
+              </div>
+            </div>
+            <div className="a4-preview-frame">
+              <iframe title={"Предпросмотр " + previewTitle} src={previewUrl} />
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
