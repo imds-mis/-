@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalogs import parse_icd_csv
 from .context import RequestContext, get_context
 from .domain import template_is_eligible
-from .models import Base, ClinicHeader, DoctorProfile, Icd10Code, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
+from .models import Base, ClinicHeader, DoctorProfile, Icd10Code, LocalPatient, MedicalDocument, ProtocolVersion, Template, TemplateAssignment, TemplateVersion, utcnow
 from .qr_tokens import create_signed_token, token_hash, verify_signed_token
 from .rendering import convert_docx_to_pdf, render_docx
 from .speech import make_http_stt, transcribe_for_field
@@ -26,6 +26,16 @@ from .template_inspection import inspect_docx_fields
 from .ai_visit import ClinicalExtractionClient, SpeechPipelineClient
 from .upstream import MisUpstreamClient
 from .visit_sessions import register_visit_session_routes
+
+
+class LocalPatientBody(BaseModel):
+    first_name: str
+    last_name: str
+    middle_name: str | None = None
+    iin: str | None = None
+    medical_record_number: str | None = None
+    date_of_birth: str | None = None
+    phone: str | None = None
 
 
 class CreateDocumentBody(BaseModel):
@@ -162,6 +172,61 @@ def create_app(
     @app.get("/healthz")
     def health():
         return {"status": "ok", "service": "medical-document-service"}
+
+    @app.post("/v1/local/patients", status_code=201)
+    def create_local_patient(
+        body: LocalPatientBody,
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        if not ctx.branch_id:
+            raise HTTPException(400, "branch context required")
+        patient = LocalPatient(
+            id=str(uuid.uuid4()),
+            tenant_id=ctx.tenant_id,
+            branch_id=ctx.branch_id,
+            first_name=body.first_name.strip(),
+            last_name=body.last_name.strip(),
+            middle_name=(body.middle_name or "").strip() or None,
+            iin=(body.iin or "").strip() or None,
+            medical_record_number=(body.medical_record_number or "").strip() or None,
+            date_of_birth=(body.date_of_birth or "").strip() or None,
+            phone=(body.phone or "").strip() or None,
+        )
+        session.add(patient)
+        session.commit()
+        return {"data": {
+            "id": patient.id,
+            "first_name": patient.first_name,
+            "last_name": patient.last_name,
+            "middle_name": patient.middle_name,
+            "iin": patient.iin,
+            "medical_record_number": patient.medical_record_number,
+            "date_of_birth": patient.date_of_birth,
+            "phone": patient.phone,
+        }}
+
+    @app.get("/v1/local/patients")
+    def list_local_patients(
+        ctx: RequestContext = Depends(get_context),
+        session: Session = Depends(db),
+    ):
+        if not ctx.branch_id:
+            raise HTTPException(400, "branch context required")
+        rows = session.scalars(select(LocalPatient).where(
+            LocalPatient.tenant_id == ctx.tenant_id,
+            LocalPatient.branch_id == ctx.branch_id,
+        ).order_by(LocalPatient.last_name, LocalPatient.first_name)).all()
+        return {"data": [{
+            "id": row.id,
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "middle_name": row.middle_name,
+            "iin": row.iin,
+            "medical_record_number": row.medical_record_number,
+            "date_of_birth": row.date_of_birth,
+            "phone": row.phone,
+        } for row in rows]}
 
     @app.get("/v1/integrations/mis/patients")
     def upstream_patients(
