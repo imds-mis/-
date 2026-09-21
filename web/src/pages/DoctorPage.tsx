@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  absoluteApiUrl,
   acceptSuggestion,
   createDocument,
   createVisitSession,
   FieldSuggestion,
   finalizeDocument,
   finishVisitSession,
+  downloadArtifact,
   getEligibleTemplates,
   getPatients,
   getProtocols,
@@ -14,6 +14,7 @@ import {
   Patient,
   searchIcd,
   TemplateField,
+  printPdf,
   TranscriptTurn,
   updateDocumentFields,
   uploadAudioChunk
@@ -84,13 +85,6 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
 
   function mergeSuggestions(items: FieldSuggestion[]) {
     setSuggestions(items);
-    const nextDraft: Record<string, string> = {};
-    for (const item of items) {
-      if (item.status === "suggested" && item.value != null) {
-        nextDraft[item.field_id] = String(item.value);
-      }
-    }
-    setValues((current) => ({ ...nextDraft, ...current }));
   }
 
   async function startVisit() {
@@ -394,13 +388,16 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
                     )}
 
                     {suggestion?.status === "suggested" && (
-                      <div className="actions">
-                        <button
-                          className="primary"
-                          onClick={() => void accept(field.id)}
-                        >
-                          Принять AI-черновик
-                        </button>
+                      <div className="suggestion-box">
+                        <div><strong>AI-черновик:</strong> {String(suggestion.value ?? "")}</div>
+                        <div className="actions">
+                          <button
+                            className="primary"
+                            onClick={() => void accept(field.id)}
+                          >
+                            Принять AI-черновик
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -492,39 +489,15 @@ export default function DoctorPage({ context }: { context: LocalContext }) {
 
           {finalDocument && (
             <div className="final-actions">
-              <a
-                target="_blank"
-                rel="noreferrer"
-                href={absoluteApiUrl(finalDocument.pdf_download_url)}
-              >
-                Открыть PDF
-              </a>
-
-              <a
-                href={absoluteApiUrl(finalDocument.pdf_download_url)}
-                download
-              >
-                Скачать PDF
-              </a>
-
-              <a
-                href={absoluteApiUrl(finalDocument.docx_download_url)}
-                download
-              >
-                Скачать DOCX
-              </a>
-
-              <button
-                onClick={() =>
-                  window.open(
-                    absoluteApiUrl(finalDocument.pdf_download_url),
-                    "_blank"
-                  )
-                }
-              >
-                Печать
+              <button onClick={() => void printPdf(context, finalDocument.pdf_download_url)}>
+                Открыть / печать PDF
               </button>
-
+              <button onClick={() => void downloadArtifact(context, finalDocument.pdf_download_url, documentId + ".pdf")}>
+                Скачать PDF
+              </button>
+              <button onClick={() => void downloadArtifact(context, finalDocument.docx_download_url, documentId + ".docx")}>
+                Скачать DOCX
+              </button>
               {finalDocument.verification_url && (
                 <a
                   target="_blank"
