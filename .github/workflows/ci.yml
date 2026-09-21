@@ -26,3 +26,4 @@ jobs:
       - run: |
           cp .env.example .env
           docker compose config >/tmp/docker-compose.resolved.yml
+          docker compose build api web
